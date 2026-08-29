@@ -34,3 +34,8 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local development files
+plan.md
+IMPLEMENTATION.md
+local.db

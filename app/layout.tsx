@@ -1,13 +1,20 @@
-import { Geist, Geist_Mono, Montserrat } from "next/font/google"
+import { Big_Shoulders, IBM_Plex_Mono, Montserrat } from "next/font/google"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
-const montserrat = Montserrat({subsets:['latin'],variable:'--font-sans'})
+const montserrat = Montserrat({ subsets: ["latin"], variable: "--font-sans" })
 
-const fontMono = Geist_Mono({
+const display = Big_Shoulders({
   subsets: ["latin"],
+  weight: ["700", "800", "900"],
+  variable: "--font-display",
+})
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-mono",
 })
 
@@ -20,10 +27,12 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", montserrat.variable)}
+      className={cn("antialiased", display.variable, plexMono.variable, "font-sans", montserrat.variable)}
     >
-      <body>
-        <ThemeProvider>{children}</ThemeProvider>
+      <body className="font-sans antialiased">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   )
