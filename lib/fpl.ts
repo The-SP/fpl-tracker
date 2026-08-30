@@ -62,23 +62,17 @@ export interface EntryHistoryItem {
   rank?: number;
   rank_sort?: number;
   percentage_change?: number;
-  entry_history?: {
-    event: number;
-    points: number;
-    total_points: number;
-    rank: number;
-    rank_sort: number;
-    percentage_change: number;
-    transfers_state: string;
-    transfers_made: number;
-    active_chip?: string;
-    value: number;
-    bank: number;
-  };
+}
+
+export interface EntryHistoryChip {
+  name: string; // e.g. "wildcard", "freehit", "bboost", "3xc", "manager"
+  time: string;
+  event: number;
 }
 
 export interface EntryHistory {
   current: EntryHistoryItem[];
+  chips: EntryHistoryChip[];
   previous?: Array<{
     event_transfers: number;
     event_transfers_cost: number;
@@ -87,6 +81,13 @@ export interface EntryHistory {
     season_name: string;
     elite_set?: number;
   }>;
+}
+
+export interface EntrySummary {
+  id: number;
+  name: string; // team name
+  player_first_name: string;
+  player_last_name: string;
 }
 
 /**
@@ -150,6 +151,23 @@ export async function fetchEntryHistory(entryId: number): Promise<EntryHistory> 
 }
 
 /**
+ * Fetch basic profile info (name/team name) for a single manager.
+ * Used to resolve display names for entries pulled in manually
+ * (e.g. someone who isn't a member of the source league).
+ */
+export async function fetchEntrySummary(entryId: number): Promise<EntrySummary> {
+  const response = await fetch(`${BASE_URL}/entry/${entryId}/`);
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch entry summary for ${entryId}: ${response.status} ${response.statusText}`
+    );
+  }
+
+  return response.json();
+}
+
+/**
  * Get the points for a specific gameweek from entry history
  */
 export function getGameweekPointsFromHistory(
@@ -165,4 +183,14 @@ export function getGameweekPointsFromHistory(
     points: gwData.points,
     total_points: gwData.total_points,
   };
+}
+
+/**
+ * Get the chip played (if any) in a specific gameweek, for reference display.
+ * Does not affect points/ranking — FPL's `points` field is already net of
+ * transfer-cost hits.
+ */
+export function getChipForGameweek(history: EntryHistory, gw: number): string | null {
+  const chip = history.chips?.find((c) => c.event === gw);
+  return chip ? chip.name : null;
 }

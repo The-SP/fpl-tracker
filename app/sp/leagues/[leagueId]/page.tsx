@@ -30,7 +30,7 @@ export default async function LeagueDetailPage({ params }: Props) {
       <div className="mx-auto max-w-4xl px-6 py-10 space-y-8">
         <div>
           <Link
-            href="/"
+            href="/sp"
             className="font-mono text-xs uppercase tracking-wide text-[#5B6B62] hover:text-[#1B5E3F] dark:text-[#8FA095] dark:hover:text-[#3FA969]"
           >
             &larr; All leagues
@@ -56,14 +56,12 @@ export default async function LeagueDetailPage({ params }: Props) {
           </div>
         ) : (
           <div className="space-y-8">
-            {/* Stat strip */}
             <div className="grid grid-cols-3 divide-x divide-[#D8DCD3] rounded-lg border border-[#D8DCD3] dark:divide-[#24352B] dark:border-[#24352B]">
               <StatBlock label="Latest GW" value={latest.gw} accent="turf" />
               <StatBlock label="Current rank" value={`#${latest.my_rank}`} accent="gold" />
               <StatBlock label="Latest points" value={latest.my_points} accent="turf" />
             </div>
 
-            {/* History table */}
             <div>
               <p className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-[#5B6B62] dark:text-[#8FA095]">
                 Rank history

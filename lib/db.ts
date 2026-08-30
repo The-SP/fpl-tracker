@@ -1,6 +1,6 @@
 import { createClient } from "@libsql/client";
 
-const db = createClient({
+export const db = createClient({
   url: process.env.DATABASE_URL || "file:./local.db",
   authToken: process.env.DATABASE_AUTH_TOKEN,
 });
@@ -197,5 +197,3 @@ export async function snapshotExists(leagueId: number, gw: number): Promise<bool
     throw error;
   }
 }
-
-export { db };

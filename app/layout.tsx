@@ -9,6 +9,8 @@ const montserrat = Montserrat({ subsets: ["latin"], variable: "--font-sans" })
 const display = Big_Shoulders({
   subsets: ["latin"],
   weight: ["700", "800", "900"],
+  fallback: ["Arial", "sans-serif"],
+  adjustFontFallback: false,
   variable: "--font-display",
 })
 
