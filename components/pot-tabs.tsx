@@ -65,16 +65,16 @@ export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee }: P
 
   return (
     <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-      <TabsList className="h-auto w-full gap-1 rounded-lg bg-[#EAEBE4] p-1 dark:bg-[#16221B]">
+      <TabsList className="min-h-14 h-auto w-full gap-1 rounded-lg bg-[#EAEBE4] p-1 dark:bg-[#16221B]">
         <TabsTrigger
           value="results"
-          className="rounded-md py-2 font-mono text-xs uppercase tracking-wide data-[state=active]:bg-[#1B5E3F] data-[state=active]:text-white"
+          className="rounded-md py-3 font-mono text-xs uppercase tracking-wide data-[state=active]:bg-[#1B5E3F] data-[state=active]:text-white"
         >
           Weekly Results
         </TabsTrigger>
         <TabsTrigger
           value="pot"
-          className="rounded-md py-2 font-mono text-xs uppercase tracking-wide data-[state=active]:bg-[#1B5E3F] data-[state=active]:text-white"
+          className="rounded-md py-3 font-mono text-xs uppercase tracking-wide data-[state=active]:bg-[#1B5E3F] data-[state=active]:text-white"
         >
           Pot / Balance
         </TabsTrigger>
@@ -85,9 +85,10 @@ export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee }: P
           <EmptyState text="No gameweeks snapshotted yet. Run the pot snapshot job to fetch finalized gameweeks." />
         ) : (
           <div className="space-y-6">
+            <div className="overflow-hidden rounded-lg border border-[#D8DCD3] dark:border-[#24352B]"><div className="border-b bg-[#EFF1EA] px-4 py-2 font-mono text-xs font-semibold uppercase dark:bg-[#131E17]">Winners</div><table className="w-full text-sm [&_tbody_tr:hover]:bg-[#EFF1EA] dark:[&_tbody_tr:hover]:bg-[#131E17]"><thead><tr className="border-b font-mono text-[11px] uppercase"><th className="px-4 py-3 text-left">GW</th><th className="px-4 py-3 text-left">Winner</th><th className="px-4 py-3 text-right">Points</th></tr></thead><tbody>{winnerRows.map((r) => <tr key={`${r.gw}-${r.entry_id}`} onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`, "_blank")} className="cursor-pointer border-b last:border-0"><td className="px-4 py-3 font-mono">GW {r.gw}</td><td className="px-4 py-3"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.player_name}</a><div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer">{r.entry_name}</a></div></td><td className="px-4 py-3 text-right font-mono">{r.points} pts</td></tr>)}</tbody></table></div>
             <div className="flex flex-wrap gap-1 rounded-lg bg-[#EAEBE4] p-1 dark:bg-[#16221B]">
               {weeklyResults.map(({ gw }) => (
-                <button key={gw} type="button" onClick={() => setSelectedGw(gw)} className={`rounded-md px-3 py-2 font-mono text-xs uppercase tracking-wide ${selectedGw === gw ? "bg-[#1B5E3F] text-white" : ""}`}>GW {gw}</button>
+                <button key={gw} type="button" onClick={() => setSelectedGw(gw)} className={`rounded-md px-3 py-3 font-mono text-xs uppercase tracking-wide ${selectedGw === gw ? "bg-[#1B5E3F] text-white" : ""}`}>GW {gw}</button>
               ))}
             </div>
             {selectedWeek && (
@@ -99,21 +100,11 @@ export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee }: P
                 </tbody></table>
               </div>
             )}
-            <div className="overflow-hidden rounded-lg border border-[#D8DCD3] dark:border-[#24352B]"><div className="border-b bg-[#EFF1EA] px-4 py-2 font-mono text-xs font-semibold uppercase dark:bg-[#131E17]">Winners</div><table className="w-full text-sm [&_tbody_tr:hover]:bg-[#EFF1EA] dark:[&_tbody_tr:hover]:bg-[#131E17]"><thead><tr className="border-b font-mono text-[11px] uppercase"><th className="px-4 py-3 text-left">GW</th><th className="px-4 py-3 text-left">Winner</th><th className="px-4 py-3 text-right">Points</th></tr></thead><tbody>{winnerRows.map((r) => <tr key={`${r.gw}-${r.entry_id}`} onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`, "_blank")} className="cursor-pointer border-b last:border-0"><td className="px-4 py-3 font-mono">GW {r.gw}</td><td className="px-4 py-3"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.player_name}</a><div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer">{r.entry_name}</a></div></td><td className="px-4 py-3 text-right font-mono">{r.points} pts</td></tr>)}</tbody></table></div>
           </div>
         )}
       </TabsContent>
 
       <TabsContent value="pot" className="mt-6 space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#D8DCD3] px-4 py-3 dark:border-[#24352B]">
-          <p className="font-mono text-xs text-[#5B6B62] dark:text-[#8FA095]">
-            {lastSettlement
-              ? `Settled through GW ${lastSettlement.settled_through_gw}. Showing balances since then.`
-              : "Never settled. Showing balances from the start."}
-          </p>
-          {latestGw && <SettleButton throughGw={latestGw} />}
-        </div>
-
         {balances.length === 0 ? (
           <EmptyState text="No unsettled results yet." />
         ) : (
@@ -160,6 +151,14 @@ export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee }: P
             </table>
           </div>
         )}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#D8DCD3] px-4 py-3 dark:border-[#24352B]">
+          <p className="font-mono text-xs text-[#5B6B62] dark:text-[#8FA095]">
+            {lastSettlement
+              ? `Settled through GW ${lastSettlement.settled_through_gw}. Showing balances since then.`
+              : "Never settled. Showing balances from the start."}
+          </p>
+          {latestGw && <SettleButton throughGw={latestGw} />}
+        </div>
         <p className="font-mono text-[11px] text-[#5B6B62] dark:text-[#8FA095]">
           Rs {entryFee} per person per gameweek. Positive net = owed to them, negative = owes the pot.
         </p>
