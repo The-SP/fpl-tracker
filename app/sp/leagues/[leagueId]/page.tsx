@@ -23,7 +23,7 @@ export default async function LeagueDetailPage({ params }: Props) {
   }
 
   const snapshots = await getLeagueData(leagueIdNum);
-  const latest = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+  const latest = snapshots.length > 0 ? snapshots[0] : null;
 
   return (
     <div className="min-h-svh bg-[#F7F8F4] text-[#10201A] dark:bg-[#0E1712] dark:text-[#EDEFEA]">

@@ -1,21 +1,33 @@
 import { runPotSnapshotJob } from "@/lib/pot-snapshot";
-import { NextRequest, NextResponse } from "next/server";
+import {
+  getLatestPotSnapshotCall,
+  recordPotSnapshotCall,
+} from "@/lib/pot-db";
+import { initializeDatabase } from "@/lib/db";
+import { NextResponse } from "next/server";
 
-async function handle(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
+const POT_SNAPSHOT_COOLDOWN_HOURS = 3;
 
-  if (!cronSecret) {
-    return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 });
-  }
-
-  if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+async function handle() {
   try {
+    await initializeDatabase();
+    const latestCall = await getLatestPotSnapshotCall();
+    if (latestCall) {
+      const elapsedHours = (Date.now() - new Date(latestCall).getTime()) / (1000 * 60 * 60);
+      if (elapsedHours < POT_SNAPSHOT_COOLDOWN_HOURS) {
+        return NextResponse.json({
+          success: true,
+          skipped: true,
+          message: `Pot snapshot checked recently. Try again after ${POT_SNAPSHOT_COOLDOWN_HOURS} hours.`,
+          calledAt: latestCall,
+        });
+      }
+    }
+
+    const calledAt = new Date().toISOString();
     await runPotSnapshotJob();
-    return NextResponse.json({ success: true, message: "Pot snapshot job completed" });
+    await recordPotSnapshotCall(calledAt);
+    return NextResponse.json({ success: true, skipped: false, message: "Pot snapshot job completed", calledAt });
   } catch (error) {
     console.error("Pot snapshot error:", error);
     return NextResponse.json(
@@ -28,10 +40,5 @@ async function handle(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  return handle(request);
-}
-
-export async function GET(request: NextRequest) {
-  return handle(request);
-}
+export const POST = handle;
+export const GET = handle;

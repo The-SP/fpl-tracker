@@ -5,6 +5,7 @@ import Link from "next/link";
 import { TRACKED_LEAGUES } from "@/config/leagues";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { FetchSnapshotButton } from "@/components/fetch-snapshot-button";
 
 async function getHomePageData() {
   await initializeDatabase();
@@ -57,6 +58,12 @@ export default async function Page() {
           </TabsList>
 
           <TabsContent value="standings" className="mt-6">
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <p className="font-mono text-xs text-[#5B6B62] dark:text-[#8FA095]">
+                Fetch finalized gameweeks from FPL.
+              </p>
+              <FetchSnapshotButton />
+            </div>
             {snapshots.length === 0 ? (
               <EmptyState />
             ) : (

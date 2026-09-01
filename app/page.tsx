@@ -1,16 +1,17 @@
 import { Suspense } from "react";
 import {
-  initializePotDatabase,
   getAllPotResultsByGw,
   getLastSettlement,
   getPotBalances,
 } from "@/lib/pot-db";
+import { initializeDatabase } from "@/lib/db";
 import { POT_ENTRY_FEE } from "@/config/pot";
 import { PotTabs } from "@/components/pot-tabs";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { FetchPotSnapshotButton } from "@/components/fetch-pot-snapshot-button";
 
 async function getPotPageData() {
-  await initializePotDatabase();
+  await initializeDatabase();
   const byGw = await getAllPotResultsByGw();
   const lastSettlement = await getLastSettlement();
   const sinceGw = lastSettlement?.settled_through_gw ?? 0;
@@ -32,7 +33,7 @@ export default async function Page() {
         <div className="flex items-start justify-between gap-4 border-b-2 border-[#10201A] pb-5 dark:border-[#EDEFEA]">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#5B6B62] dark:text-[#8FA095]">
-              Bros Before Hoes &middot; Rs {POT_ENTRY_FEE}/week, winner takes all
+              FPL &middot; Rs {POT_ENTRY_FEE}/week, winner takes all
             </p>
             <h1 className="font-display text-5xl font-black uppercase tracking-tight sm:text-6xl">
               Weekly Pot
@@ -48,6 +49,7 @@ export default async function Page() {
             lastSettlement={lastSettlement}
             entryFee={POT_ENTRY_FEE}
           />
+          <FetchPotSnapshotButton />
         </Suspense>
       </div>
     </div>

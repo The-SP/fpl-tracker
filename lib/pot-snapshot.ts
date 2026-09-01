@@ -6,8 +6,8 @@ import {
 } from "./fpl";
 import { resolvePotRoster } from "./pot-roster";
 import { fetchEntrySummary } from "./fpl";
+import { initializeDatabase } from "./db";
 import {
-  initializePotDatabase,
   getPotMembers,
   seedPotMembersIfEmpty,
   potResultExists,
@@ -97,7 +97,7 @@ export async function snapshotPotGameweek(gw: number): Promise<void> {
 }
 
 export async function runPotSnapshotJob(): Promise<void> {
-  await initializePotDatabase();
+  await initializeDatabase();
 
   let members = await getPotMembers();
   if (members.length === 0) {
