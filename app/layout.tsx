@@ -1,4 +1,5 @@
 import { Big_Shoulders, IBM_Plex_Mono, Montserrat } from "next/font/google"
+import type { Metadata } from "next"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -6,6 +7,14 @@ import { cn } from "@/lib/utils"
 
 // All pages read live data from the database; render them per request.
 export const dynamic = "force-dynamic"
+
+export const metadata: Metadata = {
+  title: "Weekly Pot | FPL Tracker",
+  description: "Fantasy Premier League weekly pot winners and results.",
+  twitter: {
+    card: "summary_large_image",
+  },
+}
 
 const montserrat = Montserrat({ subsets: ["latin"], variable: "--font-sans" })
 
