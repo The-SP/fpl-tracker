@@ -8,6 +8,10 @@ import { NextResponse } from "next/server";
 
 const POT_SNAPSHOT_COOLDOWN_HOURS = 3;
 
+// Pot snapshots make several upstream FPL requests. This is also useful on
+// Vercel plans where the default function duration is short.
+export const maxDuration = 60;
+
 async function handle() {
   try {
     await initializeDatabase();

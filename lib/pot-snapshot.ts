@@ -38,7 +38,10 @@ interface ResultRow {
  * hits, so no separate deduction step is needed. Ties share the same rank
  * and are all marked as winners (prize split evenly at read time).
  */
-export async function snapshotPotGameweek(gw: number): Promise<void> {
+export async function snapshotPotGameweek(
+  gw: number,
+  histories?: Map<number, Awaited<ReturnType<typeof fetchEntryHistory>>>,
+): Promise<void> {
   const members = await getPotMembers();
 
   const rows: Omit<ResultRow, "rank">[] = [];
@@ -47,7 +50,7 @@ export async function snapshotPotGameweek(gw: number): Promise<void> {
     if (!member.active) continue;
 
     try {
-      const history = await fetchEntryHistory(member.entry_id);
+      const history = histories?.get(member.entry_id) ?? await fetchEntryHistory(member.entry_id);
       const gwPoints = getGameweekPointsFromHistory(history, gw);
       if (!gwPoints) continue;
 
@@ -125,6 +128,24 @@ export async function runPotSnapshotJob(): Promise<void> {
 
   members = await getPotMembers();
 
+  // Fetch each manager history once. The previous implementation fetched the
+  // same history again for every finalized gameweek, which commonly exceeded
+  // Vercel's serverless function timeout.
+  const historyResults = await Promise.allSettled(
+    members.filter((member) => member.active).map(async (member) => ({
+      entryId: member.entry_id,
+      history: await fetchEntryHistory(member.entry_id),
+    }))
+  );
+  const histories = new Map<number, Awaited<ReturnType<typeof fetchEntryHistory>>>();
+  for (const result of historyResults) {
+    if (result.status === "fulfilled") {
+      histories.set(result.value.entryId, result.value.history);
+    } else {
+      console.error("Pot: failed to fetch a manager history", result.reason);
+    }
+  }
+
   const finalizedGws = await getFinalizedGameweeksForPot();
 
   for (const gw of finalizedGws) {
@@ -134,6 +155,6 @@ export async function runPotSnapshotJob(): Promise<void> {
     const allDone = statuses.every(Boolean);
     if (allDone) continue;
 
-    await snapshotPotGameweek(gw);
+    await snapshotPotGameweek(gw, histories);
   }
 }
