@@ -4,6 +4,9 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 
+// All pages read live data from the database; render them per request.
+export const dynamic = "force-dynamic"
+
 const montserrat = Montserrat({ subsets: ["latin"], variable: "--font-sans" })
 
 const display = Big_Shoulders({
