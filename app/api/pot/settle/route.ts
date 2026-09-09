@@ -1,8 +1,11 @@
 import { settlePot } from "@/lib/pot-db";
+import { initializeDatabase } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   try {
+    await initializeDatabase();
+
     const body = await request.json();
     const throughGw = Number(body?.throughGw);
 

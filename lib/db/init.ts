@@ -1,7 +1,27 @@
 import { db } from "./index"
 import { MIGRATIONS } from "./migration"
 
-export async function initializeDatabase(): Promise<void> {
+let initializationPromise: Promise<void> | undefined
+
+/**
+ * Initialize the schema once per application process.
+ *
+ * The promise is cached, rather than just the completed state, so concurrent
+ * requests cannot run migrations at the same time. Failed initialization is
+ * cleared so a later request can retry it.
+ */
+export function initializeDatabase(): Promise<void> {
+  if (initializationPromise) return initializationPromise
+
+  initializationPromise = runMigrations().catch((error) => {
+    initializationPromise = undefined
+    throw error
+  })
+
+  return initializationPromise
+}
+
+async function runMigrations(): Promise<void> {
   try {
     await db.execute(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
