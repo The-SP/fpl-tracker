@@ -6,7 +6,7 @@ import {
 import { initializeDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 
-const POT_SNAPSHOT_COOLDOWN_HOURS = 3;
+const POT_SNAPSHOT_COOLDOWN_HOURS = 1;
 
 // Pot snapshots make several upstream FPL requests. This is also useful on
 // Vercel plans where the default function duration is short.

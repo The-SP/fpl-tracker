@@ -11,6 +11,7 @@ import {
   getPotMembers,
   seedPotMembersIfEmpty,
   potResultExists,
+  recalculatePotRankings,
   storePotResult,
   updatePotMemberNames,
   type PotGwResult,
@@ -21,6 +22,16 @@ export async function getFinalizedGameweeksForPot(): Promise<number[]> {
   return bootstrap.events
     .filter((e) => e.finished && e.data_checked)
     .map((e) => e.id);
+}
+
+export async function getPotGameweeksToSnapshot(): Promise<Map<number, boolean>> {
+  const bootstrap = await fetchBootstrap();
+  const gameweeks = new Map<number, boolean>();
+  for (const event of bootstrap.events) {
+    if (event.finished && event.data_checked) gameweeks.set(event.id, true);
+    else if (!event.finished) gameweeks.set(event.id, false);
+  }
+  return gameweeks;
 }
 
 interface ResultRow {
@@ -40,6 +51,7 @@ interface ResultRow {
  */
 export async function snapshotPotGameweek(
   gw: number,
+  isFinal: boolean,
   histories?: Map<number, Awaited<ReturnType<typeof fetchEntryHistory>>>,
 ): Promise<void> {
   const members = await getPotMembers();
@@ -92,6 +104,7 @@ export async function snapshotPotGameweek(
       rank: row.rank,
       is_winner: row.points === topScore,
       chip: row.chip,
+      is_final: isFinal,
     };
     await storePotResult(result);
   }
@@ -127,6 +140,7 @@ export async function runPotSnapshotJob(): Promise<void> {
   }
 
   members = await getPotMembers();
+  await recalculatePotRankings();
 
   // Fetch each manager history once. The previous implementation fetched the
   // same history again for every finalized gameweek, which commonly exceeded
@@ -146,15 +160,15 @@ export async function runPotSnapshotJob(): Promise<void> {
     }
   }
 
-  const finalizedGws = await getFinalizedGameweeksForPot();
+  const gameweeks = await getPotGameweeksToSnapshot();
 
-  for (const gw of finalizedGws) {
+  for (const [gw, isFinal] of gameweeks) {
     const statuses = await Promise.all(
       members.map((m) => potResultExists(gw, m.entry_id))
     );
     const allDone = statuses.every(Boolean);
-    if (allDone) continue;
+    if (allDone && isFinal) continue;
 
-    await snapshotPotGameweek(gw, histories);
+    await snapshotPotGameweek(gw, isFinal, histories);
   }
 }

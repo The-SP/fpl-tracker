@@ -51,4 +51,10 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    name: "002_pot_result_status",
+    sql: `
+      ALTER TABLE pot_gw_results ADD COLUMN is_final INTEGER NOT NULL DEFAULT 1;
+    `,
+  },
 ]

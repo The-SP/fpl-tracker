@@ -20,12 +20,13 @@ async function getPotPageData() {
   const weeklyResults = Array.from(byGw.entries())
     .sort((a, b) => b[0] - a[0])
     .map(([gw, results]) => ({ gw, results }));
+  const latestFinalGw = weeklyResults.find((week) => week.results.every((r) => r.is_final))?.gw ?? null;
 
-  return { weeklyResults, balances, lastSettlement };
+  return { weeklyResults, balances, lastSettlement, latestFinalGw };
 }
 
 export default async function Page() {
-  const { weeklyResults, balances, lastSettlement } = await getPotPageData();
+  const { weeklyResults, balances, lastSettlement, latestFinalGw } = await getPotPageData();
 
   return (
     <div className="min-h-svh bg-[#F7F8F4] text-[#10201A] dark:bg-[#0E1712] dark:text-[#EDEFEA]">
@@ -48,6 +49,7 @@ export default async function Page() {
             balances={balances}
             lastSettlement={lastSettlement}
             entryFee={POT_ENTRY_FEE}
+            latestFinalGw={latestFinalGw}
           />
           <FetchPotSnapshotButton />
         </Suspense>

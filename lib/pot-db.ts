@@ -18,6 +18,7 @@ export interface PotGwResult {
   rank: number
   is_winner: boolean
   chip: string | null
+  is_final: boolean
 }
 
 export interface PotBalance {
@@ -111,13 +112,14 @@ export async function potResultExists(
 
 export async function storePotResult(result: PotGwResult): Promise<void> {
   await db.execute({
-    sql: `INSERT INTO pot_gw_results (gw, entry_id, points, rank, is_winner, chip)
-          VALUES (?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO pot_gw_results (gw, entry_id, points, rank, is_winner, chip, is_final)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(gw, entry_id) DO UPDATE SET
             points = excluded.points,
             rank = excluded.rank,
             is_winner = excluded.is_winner,
-            chip = excluded.chip`,
+            chip = excluded.chip,
+            is_final = excluded.is_final`,
     args: [
       result.gw,
       result.entry_id,
@@ -125,8 +127,35 @@ export async function storePotResult(result: PotGwResult): Promise<void> {
       result.rank,
       result.is_winner ? 1 : 0,
       result.chip,
+      result.is_final ? 1 : 0,
     ],
   })
+}
+
+export async function recalculatePotRankings(): Promise<void> {
+  const result = await db.execute(
+    "SELECT gw, entry_id, points FROM pot_gw_results ORDER BY gw ASC, points DESC"
+  )
+  const byGw = new Map<number, { entryId: number; points: number }[]>()
+
+  for (const row of result.rows as DatabaseRow[]) {
+    const gw = Number(row.gw)
+    if (!byGw.has(gw)) byGw.set(gw, [])
+    byGw.get(gw)!.push({ entryId: Number(row.entry_id), points: Number(row.points) })
+  }
+
+  for (const rows of byGw.values()) {
+    const topScore = rows[0]?.points
+    for (let index = 0; index < rows.length; index++) {
+      const rank = index > 0 && rows[index - 1].points === rows[index].points
+        ? index
+        : index + 1
+      await db.execute({
+        sql: "UPDATE pot_gw_results SET rank = ?, is_winner = ? WHERE gw = ? AND entry_id = ?",
+        args: [rank, rows[index].points === topScore ? 1 : 0, [...byGw.entries()].find(([gameweek, gameweekRows]) => gameweekRows === rows)?.[0], rows[index].entryId],
+      })
+    }
+  }
 }
 
 export async function getAllPotResultsByGw(): Promise<
@@ -134,7 +163,7 @@ export async function getAllPotResultsByGw(): Promise<
 > {
   const result = await db.execute(
     `SELECT r.gw, r.entry_id, m.entry_name, m.player_name,
-            r.points, r.rank, r.is_winner, r.chip
+            r.points, r.rank, r.is_winner, r.chip, r.is_final
      FROM pot_gw_results r
      JOIN pot_members m ON m.entry_id = r.entry_id
      ORDER BY r.gw DESC, r.rank ASC`
@@ -151,6 +180,7 @@ export async function getAllPotResultsByGw(): Promise<
       rank: Number(row.rank),
       is_winner: !!row.is_winner,
       chip: row.chip ? String(row.chip) : null,
+      is_final: !!row.is_final,
     }
     if (!byGw.has(r.gw)) byGw.set(r.gw, [])
     byGw.get(r.gw)!.push(r)
@@ -192,6 +222,7 @@ export async function getPotBalances(
   const balances = new Map<number, PotBalance>()
 
   for (const [gw, rows] of byGw) {
+    if (rows.some((row) => !row.is_final)) continue
     if (gw <= sinceGw) continue
 
     const potSize = feePerMember * rows.length
