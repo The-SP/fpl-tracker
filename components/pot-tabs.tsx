@@ -5,7 +5,7 @@ import { useState } from "react";
 import { RankBadge } from "@/components/rank-badge";
 import { SettleButton } from "@/components/settle-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { PotGwResult, PotBalance, PotSettlement } from "@/lib/pot-db";
+import type { PotGwResult, PotOverallResult, PotBalance, PotSettlement } from "@/lib/pot-db";
 
 interface WeeklyResults {
   gw: number;
@@ -14,6 +14,7 @@ interface WeeklyResults {
 
 interface PotTabsProps {
   weeklyResults: WeeklyResults[];
+  overallResults: PotOverallResult[];
   balances: PotBalance[];
   lastSettlement: PotSettlement | null;
   entryFee: number;
@@ -33,15 +34,17 @@ function chipLabel(chip: string | null): string | null {
   return CHIP_LABELS[chip] ?? chip.toUpperCase();
 }
 
-export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee, latestFinalGw }: PotTabsProps) {
+export function PotTabs({ weeklyResults, overallResults, balances, lastSettlement, entryFee, latestFinalGw }: PotTabsProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const activeTab = searchParams.get("tab") === "pot" ? "pot" : "results";
   const latestGw = weeklyResults[0]?.gw;
-  const [selectedGw, setSelectedGw] = useState(latestGw);
-  const selectedWeek = weeklyResults.find((week) => week.gw === selectedGw);
+  const [selectedGw, setSelectedGw] = useState<number | "overall">(latestGw ?? "overall");
+  const selectedWeek = typeof selectedGw === "number"
+    ? weeklyResults.find((week) => week.gw === selectedGw)
+    : undefined;
   const winnerRows = Array.from(
     new Map(
       weeklyResults
@@ -88,15 +91,26 @@ export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee, lat
           <div className="space-y-6">
             <div className="overflow-hidden rounded-lg border border-[#D8DCD3] dark:border-[#24352B]"><div className="border-b bg-[#EFF1EA] px-4 py-2 font-mono text-xs font-semibold uppercase dark:bg-[#131E17]">Winners</div><table className="w-full text-sm [&_tbody_tr:hover]:bg-[#EFF1EA] dark:[&_tbody_tr:hover]:bg-[#131E17]"><thead><tr className="border-b font-mono text-[11px] uppercase"><th className="px-4 py-3 text-left">GW</th><th className="px-4 py-3 text-left">Winner</th><th className="px-4 py-3 text-right">Points</th></tr></thead><tbody>{winnerRows.map((r) => <tr key={`${r.gw}-${r.entry_id}`} onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`, "_blank")} className="cursor-pointer border-b last:border-0"><td className="px-4 py-3 font-mono">{r.is_final ? `GW ${r.gw}` : <span aria-label="Live gameweek" title="Live gameweek" className="inline-block h-2.5 w-2.5 rounded-full bg-[#1B5E3F] shadow-[0_0_0_3px_rgba(27,94,63,0.15)] dark:bg-[#3FA968]" />}</td><td className="px-4 py-3"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.player_name}</a><div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer">{r.entry_name}</a>{!r.is_final && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">Live GW, winner may change.</div>}</div></td><td className="px-4 py-3 text-right font-mono">{r.points} pts</td></tr>)}</tbody></table></div>
             <div className="flex flex-wrap gap-1 rounded-lg bg-[#EAEBE4] p-1 dark:bg-[#16221B]">
+              <button type="button" onClick={() => setSelectedGw("overall")} className={`rounded-md px-3 py-3 font-mono text-xs uppercase tracking-wide ${selectedGw === "overall" ? "bg-[#1B5E3F] text-white" : ""}`}>Overall</button>
               {weeklyResults.map(({ gw }) => (
                 <button key={gw} type="button" onClick={() => setSelectedGw(gw)} className={`rounded-md px-3 py-3 font-mono text-xs uppercase tracking-wide ${selectedGw === gw ? "bg-[#1B5E3F] text-white" : ""}`}>GW {gw}</button>
               ))}
             </div>
+            {selectedGw === "overall" && overallResults.length > 0 && (
+              <>
+                {overallResults.some((r) => !r.is_final) && <div className="rounded-lg border-2 border-amber-500 bg-amber-100 px-4 py-3 text-amber-950 dark:bg-amber-950/40 dark:text-amber-200"><p className="font-mono text-sm font-bold uppercase tracking-wide">Overall · Live provisional ranking</p><p className="mt-1 text-sm">This table includes the current live gameweek and may change before it is finalized.</p></div>}
+                <div className="overflow-hidden rounded-lg border border-[#D8DCD3] dark:border-[#24352B]">
+                  <table className="w-full border-collapse text-sm [&_tbody_tr:hover]:bg-[#EFF1EA] dark:[&_tbody_tr:hover]:bg-[#131E17]"><thead><tr className="border-b font-mono text-[11px] uppercase"><th className="w-12 px-4 py-3 text-left">Rank</th><th className="px-2 py-3 text-left">Manager</th><th className="px-4 py-3 text-right">Points</th></tr></thead><tbody>
+                    {overallResults.map((r) => <tr key={r.entry_id} onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.latest_gw}`, "_blank")} className="cursor-pointer border-b border-[#EAEBE4] last:border-0 dark:border-[#1B241D]"><td className="w-12 px-4 py-2.5"><RankBadge rank={r.rank} size="sm" /></td><td className="px-2 py-2.5 font-medium"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.latest_gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.player_name}</a><div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.latest_gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.entry_name}</a></div></td><td className="px-4 py-2.5 text-right font-mono font-semibold">{r.points} pts</td></tr>)}
+                  </tbody></table>
+                </div>
+              </>
+            )}
             {selectedWeek && (
               <>
               {!selectedWeek.results[0]?.is_final && <div className="rounded-lg border-2 border-amber-500 bg-amber-100 px-4 py-3 text-amber-950 dark:bg-amber-950/40 dark:text-amber-200"><p className="font-mono text-sm font-bold uppercase tracking-wide">GW {selectedWeek.gw} · Live provisional ranking</p><p className="mt-1 text-sm">This gameweek is still in progress. Points, bonus points, and the winner may change before it is finalized.</p></div>}
               <div className="overflow-hidden rounded-lg border border-[#D8DCD3] dark:border-[#24352B]">
-                <table className="w-full border-collapse text-sm [&_tbody_tr:hover]:bg-[#EFF1EA] dark:[&_tbody_tr:hover]:bg-[#131E17]"><tbody>
+                <table className="w-full border-collapse text-sm [&_tbody_tr:hover]:bg-[#EFF1EA] dark:[&_tbody_tr:hover]:bg-[#131E17]"><thead><tr className="border-b font-mono text-[11px] uppercase"><th className="w-12 px-4 py-3 text-left">Rank</th><th className="px-2 py-3 text-left">Manager</th><th className="px-4 py-3 text-right">Points</th></tr></thead><tbody>
                   {selectedWeek.results.map((r) => (
                     <tr key={r.entry_id} onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`, "_blank")} className="cursor-pointer border-b border-[#EAEBE4] last:border-0 dark:border-[#1B241D]"><td className="w-12 px-4 py-2.5"><RankBadge rank={r.rank} size="sm" /></td><td className="px-2 py-2.5 font-medium"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.player_name}</a><div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${r.entry_id}/event/${r.gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{r.entry_name}</a></div></td><td className="px-4 py-2.5 text-right font-mono font-semibold">{r.points} pts</td></tr>
                   ))}
@@ -126,12 +140,12 @@ export function PotTabs({ weeklyResults, balances, lastSettlement, entryFee, lat
                 {balances.map((b) => (
                   <tr
                     key={b.entry_id}
-                    onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${b.entry_id}/history`, "_blank")}
+                    onClick={() => window.open(`https://fantasy.premierleague.com/en/entry/${b.entry_id}/event/${b.latest_gw}`, "_blank")}
                     className="cursor-pointer border-b border-[#EAEBE4] last:border-0 dark:border-[#1B241D]"
                   >
                     <td className="px-4 py-3 font-medium">
-                      <div><a href={`https://fantasy.premierleague.com/en/entry/${b.entry_id}/history`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{b.player_name}</a></div>
-                      <div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${b.entry_id}/history`} target="_blank" rel="noreferrer">{b.entry_name}</a></div>
+                      <div><a href={`https://fantasy.premierleague.com/en/entry/${b.entry_id}/event/${b.latest_gw}`} target="_blank" rel="noreferrer" className="text-inherit hover:underline">{b.player_name}</a></div>
+                      <div className="text-xs text-[#5B6B62] dark:text-[#8FA095]"><a href={`https://fantasy.premierleague.com/en/entry/${b.entry_id}/event/${b.latest_gw}`} target="_blank" rel="noreferrer">{b.entry_name}</a></div>
                     </td>
                     <td className="px-4 py-3 text-center font-mono tabular-nums">
                       {b.won_gws.map((gw) => <a key={gw} href={`https://fantasy.premierleague.com/en/entry/${b.entry_id}/event/${gw}`} target="_blank" rel="noreferrer" className="mr-1 inline-block rounded border px-2 py-0.5 text-xs hover:bg-[#EAEBE4] dark:hover:bg-[#24352B]">GW {gw}</a>)}

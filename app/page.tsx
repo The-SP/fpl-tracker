@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import {
   getAllPotResultsByGw,
+  getOverallPotResults,
   getLastSettlement,
   getPotBalances,
 } from "@/lib/pot-db";
@@ -13,6 +14,7 @@ import { FetchPotSnapshotButton } from "@/components/fetch-pot-snapshot-button";
 async function getPotPageData() {
   await initializeDatabase();
   const byGw = await getAllPotResultsByGw();
+  const overallResults = await getOverallPotResults();
   const lastSettlement = await getLastSettlement();
   const sinceGw = lastSettlement?.settled_through_gw ?? 0;
   const balances = await getPotBalances(sinceGw, POT_ENTRY_FEE);
@@ -22,11 +24,11 @@ async function getPotPageData() {
     .map(([gw, results]) => ({ gw, results }));
   const latestFinalGw = weeklyResults.find((week) => week.results.every((r) => r.is_final))?.gw ?? null;
 
-  return { weeklyResults, balances, lastSettlement, latestFinalGw };
+  return { weeklyResults, overallResults, balances, lastSettlement, latestFinalGw };
 }
 
 export default async function Page() {
-  const { weeklyResults, balances, lastSettlement, latestFinalGw } = await getPotPageData();
+  const { weeklyResults, overallResults, balances, lastSettlement, latestFinalGw } = await getPotPageData();
 
   return (
     <div className="min-h-svh bg-[#F7F8F4] text-[#10201A] dark:bg-[#0E1712] dark:text-[#EDEFEA]">
@@ -46,6 +48,7 @@ export default async function Page() {
         <Suspense fallback={null}>
           <PotTabs
             weeklyResults={weeklyResults}
+            overallResults={overallResults}
             balances={balances}
             lastSettlement={lastSettlement}
             entryFee={POT_ENTRY_FEE}

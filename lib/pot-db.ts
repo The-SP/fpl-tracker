@@ -26,6 +26,7 @@ export interface PotBalance {
   entry_name: string
   player_name: string
   gws_played: number
+  latest_gw: number
   won_gws: number[]
   wins: number
   net: number
@@ -34,6 +35,17 @@ export interface PotBalance {
 export interface PotSettlement {
   settled_through_gw: number
   settled_at: string
+}
+
+export interface PotOverallResult {
+  entry_id: number
+  entry_name: string
+  player_name: string
+  points: number
+  rank: number
+  gws_played: number
+  latest_gw: number
+  is_final: boolean
 }
 
 function nullableString(value: unknown): string {
@@ -144,15 +156,17 @@ export async function recalculatePotRankings(): Promise<void> {
     byGw.get(gw)!.push({ entryId: Number(row.entry_id), points: Number(row.points) })
   }
 
-  for (const rows of byGw.values()) {
+  for (const [gw, rows] of byGw.entries()) {
     const topScore = rows[0]?.points
     for (let index = 0; index < rows.length; index++) {
-      const rank = index > 0 && rows[index - 1].points === rows[index].points
+      const row = rows[index]
+      const previousRow = rows[index - 1]
+      const rank = index > 0 && previousRow.points === row.points
         ? index
         : index + 1
       await db.execute({
         sql: "UPDATE pot_gw_results SET rank = ?, is_winner = ? WHERE gw = ? AND entry_id = ?",
-        args: [rank, rows[index].points === topScore ? 1 : 0, [...byGw.entries()].find(([gameweek, gameweekRows]) => gameweekRows === rows)?.[0], rows[index].entryId],
+        args: [rank, row.points === topScore ? 1 : 0, gw, row.entryId],
       })
     }
   }
@@ -186,6 +200,41 @@ export async function getAllPotResultsByGw(): Promise<
     byGw.get(r.gw)!.push(r)
   }
   return byGw
+}
+
+export async function getOverallPotResults(): Promise<PotOverallResult[]> {
+  const result = await db.execute(
+    `SELECT r.entry_id, m.entry_name, m.player_name,
+            SUM(r.points) AS points,
+            COUNT(DISTINCT r.gw) AS gws_played,
+            MAX(r.gw) AS latest_gw,
+            MIN(r.is_final) AS is_final
+     FROM pot_gw_results r
+     JOIN pot_members m ON m.entry_id = r.entry_id
+     GROUP BY r.entry_id, m.entry_name, m.player_name
+     ORDER BY points DESC, m.player_name ASC`
+  )
+
+  const rows = (result.rows as DatabaseRow[]).map((row) => ({
+    entry_id: Number(row.entry_id),
+    entry_name: nullableString(row.entry_name),
+    player_name: nullableString(row.player_name),
+    points: Number(row.points),
+    rank: 0,
+    gws_played: Number(row.gws_played),
+    latest_gw: Number(row.latest_gw),
+    is_final: !!row.is_final,
+  }))
+
+  let currentRank = 1
+  for (let index = 0; index < rows.length; index++) {
+    if (index > 0 && rows[index - 1].points !== rows[index].points) {
+      currentRank = index + 1
+    }
+    rows[index].rank = currentRank
+  }
+
+  return rows
 }
 
 export async function getLastSettlement(): Promise<PotSettlement | null> {
@@ -236,6 +285,7 @@ export async function getPotBalances(
           entry_name: row.entry_name,
           player_name: row.player_name,
           gws_played: 0,
+          latest_gw: 0,
           won_gws: [],
           wins: 0,
           net: 0,
@@ -243,6 +293,7 @@ export async function getPotBalances(
       }
       const b = balances.get(row.entry_id)!
       b.gws_played += 1
+      b.latest_gw = Math.max(b.latest_gw, gw)
       b.net -= feePerMember
       if (row.is_winner) {
         b.wins += 1
