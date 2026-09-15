@@ -24,11 +24,6 @@ export const TRACKED_LEAGUES: League[] = [
     name: "Kathmandu Master's FPL⚽ S4",
   },
   {
-    id: 797282,
-    name: "Jesey Pasal Nepal JPN",
-  },
-
-  {
     id: 719910,
     name: "Bros Before Hoes",
   },

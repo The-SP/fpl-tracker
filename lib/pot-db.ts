@@ -122,6 +122,17 @@ export async function potResultExists(
   return result.rows.length > 0
 }
 
+export async function potResultIsFinal(
+  gw: number,
+  entryId: number,
+): Promise<boolean> {
+  const result = await db.execute({
+    sql: "SELECT is_final FROM pot_gw_results WHERE gw = ? AND entry_id = ?",
+    args: [gw, entryId],
+  })
+  return result.rows.length > 0 && !!result.rows[0].is_final
+}
+
 export async function storePotResult(result: PotGwResult): Promise<void> {
   await db.execute({
     sql: `INSERT INTO pot_gw_results (gw, entry_id, points, rank, is_winner, chip, is_final)

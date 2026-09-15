@@ -11,6 +11,7 @@ import {
   getPotMembers,
   seedPotMembersIfEmpty,
   potResultExists,
+  potResultIsFinal,
   recalculatePotRankings,
   storePotResult,
   updatePotMemberNames,
@@ -161,13 +162,16 @@ export async function runPotSnapshotJob(): Promise<void> {
   }
 
   const gameweeks = await getPotGameweeksToSnapshot();
-
   for (const [gw, isFinal] of gameweeks) {
     const statuses = await Promise.all(
       members.map((m) => potResultExists(gw, m.entry_id))
     );
     const allDone = statuses.every(Boolean);
-    if (allDone && isFinal) continue;
+    const allFinal = isFinal && (await Promise.all(
+      members.map((m) => potResultIsFinal(gw, m.entry_id))
+    )).every(Boolean);
+    // Reprocess provisional rows when FPL finalizes a gameweek.
+    if (allDone && allFinal) continue;
 
     await snapshotPotGameweek(gw, isFinal, histories);
   }
