@@ -1,131 +1,116 @@
 import {
   fetchBootstrap,
-  fetchEntryHistory,
+  fetchEntryHistories,
+  fetchEntrySummary,
   getGameweekPointsFromHistory,
   getChipForGameweek,
+  type BootstrapData,
+  type EntryHistory,
 } from "./fpl";
 import { resolvePotRoster } from "./pot-roster";
-import { fetchEntrySummary } from "./fpl";
 import { initializeDatabase } from "./db";
+import { competitionRank } from "./ranking";
 import {
   getPotMembers,
+  getStoredPotResultStatus,
   seedPotMembersIfEmpty,
-  potResultExists,
-  potResultIsFinal,
   recalculatePotRankings,
-  storePotResult,
+  storePotResults,
   updatePotMemberNames,
   type PotGwResult,
+  type PotMember,
 } from "./pot-db";
 
-export async function getFinalizedGameweeksForPot(): Promise<number[]> {
-  const bootstrap = await fetchBootstrap();
-  return bootstrap.events
-    .filter((e) => e.finished && e.data_checked)
-    .map((e) => e.id);
-}
-
-export async function getPotGameweeksToSnapshot(): Promise<Map<number, boolean>> {
-  const bootstrap = await fetchBootstrap();
+/**
+ * Gameweeks worth snapshotting, mapped to whether FPL has finalized them.
+ * Finished and data-checked gameweeks are final; the current gameweek and
+ * finished ones still awaiting FPL's data check are provisional. Future
+ * gameweeks are skipped.
+ */
+export function getPotGameweekStatuses(bootstrap: BootstrapData): Map<number, boolean> {
   const gameweeks = new Map<number, boolean>();
   for (const event of bootstrap.events) {
     if (event.finished && event.data_checked) gameweeks.set(event.id, true);
-    else if (!event.finished) gameweeks.set(event.id, false);
+    else if (event.finished || event.is_current) gameweeks.set(event.id, false);
   }
   return gameweeks;
 }
 
-interface ResultRow {
-  entry_id: number;
-  entry_name: string;
-  player_name: string;
-  points: number;
-  chip: string | null;
-  rank: number;
-}
-
 /**
- * Snapshot a single gameweek for the whole pot roster.
- * Ranking uses FPL's `points` field directly — already net of transfer-cost
- * hits, so no separate deduction step is needed. Ties share the same rank
- * and are all marked as winners (prize split evenly at read time).
+ * Build one gameweek's ranked results for the active roster.
+ * Ranking uses FPL's `points` field directly, which is already net of
+ * transfer-cost hits. Ties share the same rank and are all marked as winners
+ * (prize split evenly at read time). Members whose history could not be
+ * fetched are returned in `missingIds`.
  */
-export async function snapshotPotGameweek(
+export function buildPotGameweekResults(
   gw: number,
   isFinal: boolean,
-  histories?: Map<number, Awaited<ReturnType<typeof fetchEntryHistory>>>,
-): Promise<void> {
-  const members = await getPotMembers();
-
-  const rows: Omit<ResultRow, "rank">[] = [];
+  members: PotMember[],
+  histories: Map<number, EntryHistory>,
+): { results: PotGwResult[]; missingIds: number[] } {
+  const missingIds: number[] = [];
+  const rows: Omit<PotGwResult, "rank" | "is_winner">[] = [];
 
   for (const member of members) {
     if (!member.active) continue;
 
-    try {
-      const history = histories?.get(member.entry_id) ?? await fetchEntryHistory(member.entry_id);
-      const gwPoints = getGameweekPointsFromHistory(history, gw);
-      if (!gwPoints) continue;
-
-      rows.push({
-        entry_id: member.entry_id,
-        entry_name: member.entry_name,
-        player_name: member.player_name,
-        points: gwPoints.points,
-        chip: getChipForGameweek(history, gw),
-      });
-    } catch (error) {
-      console.error(`Pot: failed to fetch history for entry ${member.entry_id}`, error);
+    const history = histories.get(member.entry_id);
+    if (!history) {
+      missingIds.push(member.entry_id);
+      continue;
     }
-  }
 
-  if (rows.length === 0) return;
+    const gwPoints = getGameweekPointsFromHistory(history, gw);
+    if (!gwPoints) continue;
 
-  rows.sort((a, b) => b.points - a.points);
-
-  // Standard competition ranking: ties share a rank (e.g. 1, 1, 3)
-  const ranked: ResultRow[] = rows.map((row) => ({ ...row, rank: 0 }));
-  let currentRank = 1;
-  for (let i = 0; i < ranked.length; i++) {
-    if (i > 0 && ranked[i - 1].points !== ranked[i].points) {
-      currentRank = i + 1;
-    }
-    ranked[i].rank = currentRank;
-  }
-
-  const topScore = ranked[0].points;
-
-  for (const row of ranked) {
-    const result: PotGwResult = {
+    rows.push({
       gw,
-      entry_id: row.entry_id,
-      entry_name: row.entry_name,
-      player_name: row.player_name,
-      points: row.points,
-      rank: row.rank,
-      is_winner: row.points === topScore,
-      chip: row.chip,
+      entry_id: member.entry_id,
+      entry_name: member.entry_name,
+      player_name: member.player_name,
+      points: gwPoints.points,
+      chip: getChipForGameweek(history, gw),
       is_final: isFinal,
-    };
-    await storePotResult(result);
+    });
   }
 
-  console.log(`Pot: GW ${gw} snapshotted (${ranked.length} members, top score ${topScore})`);
+  const results = competitionRank(rows, (row) => row.points).map(({ item, rank }) => ({
+    ...item,
+    rank,
+    is_winner: rank === 1,
+  }));
+
+  return { results, missingIds };
 }
 
-export async function runPotSnapshotJob(): Promise<void> {
-  await initializeDatabase();
+/**
+ * Whether stored results for a gameweek are complete and final, so the
+ * gameweek can be skipped. Members whose history failed to load are expected
+ * to already have a final row; members without a row for this gameweek in
+ * their history (for example, they joined later) are not expected at all.
+ */
+function isGameweekUpToDate(
+  gw: number,
+  isFinal: boolean,
+  members: PotMember[],
+  histories: Map<number, EntryHistory>,
+  stored: Map<number, boolean> | undefined,
+): boolean {
+  if (!isFinal || !stored) return false;
 
-  let members = await getPotMembers();
-  if (members.length === 0) {
-    console.log("Pot: no roster yet, resolving from source league...");
-    const roster = await resolvePotRoster();
-    await seedPotMembersIfEmpty(roster);
-    members = await getPotMembers();
-  }
+  return members
+    .filter((member) => member.active)
+    .filter((member) => {
+      const history = histories.get(member.entry_id);
+      return !history || getGameweekPointsFromHistory(history, gw) !== null;
+    })
+    .every((member) => stored.get(member.entry_id) === true);
+}
 
+async function repairMissingMemberNames(members: PotMember[]): Promise<void> {
   // Older seeded rosters may have NULL manager names. Repair those entries
-  // and their already-snapshotted results from the authoritative FPL profile.
+  // from the authoritative FPL profile.
   for (const member of members) {
     if (member.player_name && member.entry_name) continue;
     try {
@@ -139,40 +124,61 @@ export async function runPotSnapshotJob(): Promise<void> {
       console.error(`Pot: failed to repair names for entry ${member.entry_id}`, error);
     }
   }
+}
 
-  members = await getPotMembers();
-  await recalculatePotRankings();
+/**
+ * Snapshot every started gameweek for the pot roster. Throws after processing
+ * if any manager history could not be fetched, so the run is not recorded as
+ * successful and stays retryable.
+ */
+export async function runPotSnapshotJob(): Promise<void> {
+  await initializeDatabase();
 
-  // Fetch each manager history once. The previous implementation fetched the
-  // same history again for every finalized gameweek, which commonly exceeded
-  // Vercel's serverless function timeout.
-  const historyResults = await Promise.allSettled(
-    members.filter((member) => member.active).map(async (member) => ({
-      entryId: member.entry_id,
-      history: await fetchEntryHistory(member.entry_id),
-    }))
-  );
-  const histories = new Map<number, Awaited<ReturnType<typeof fetchEntryHistory>>>();
-  for (const result of historyResults) {
-    if (result.status === "fulfilled") {
-      histories.set(result.value.entryId, result.value.history);
-    } else {
-      console.error("Pot: failed to fetch a manager history", result.reason);
-    }
+  let members = await getPotMembers();
+  if (members.length === 0) {
+    console.log("Pot: no roster yet, resolving from source league...");
+    const roster = await resolvePotRoster();
+    await seedPotMembersIfEmpty(roster);
+    members = await getPotMembers();
   }
 
-  const gameweeks = await getPotGameweeksToSnapshot();
-  for (const [gw, isFinal] of gameweeks) {
-    const statuses = await Promise.all(
-      members.map((m) => potResultExists(gw, m.entry_id))
-    );
-    const allDone = statuses.every(Boolean);
-    const allFinal = isFinal && (await Promise.all(
-      members.map((m) => potResultIsFinal(gw, m.entry_id))
-    )).every(Boolean);
-    // Reprocess provisional rows when FPL finalizes a gameweek.
-    if (allDone && allFinal) continue;
+  await repairMissingMemberNames(members);
+  members = await getPotMembers();
 
-    await snapshotPotGameweek(gw, isFinal, histories);
+  // Fetch each manager history once and reuse it for every gameweek.
+  const [bootstrap, { histories, failedIds }, storedStatus] = await Promise.all([
+    fetchBootstrap(),
+    fetchEntryHistories(members.filter((m) => m.active).map((m) => m.entry_id)),
+    getStoredPotResultStatus(),
+  ]);
+
+  for (const [gw, isFinal] of getPotGameweekStatuses(bootstrap)) {
+    if (isGameweekUpToDate(gw, isFinal, members, histories, storedStatus.get(gw))) {
+      continue;
+    }
+
+    const { results, missingIds } = buildPotGameweekResults(gw, isFinal, members, histories);
+
+    // A final gameweek must include every member, or the stored winner could
+    // be wrong. Leave it for the next run. Provisional gameweeks are still
+    // written, since they are excluded from balances.
+    if (isFinal && missingIds.length > 0) {
+      console.warn(`Pot: skipping final GW ${gw}, missing histories for ${missingIds.join(", ")}`);
+      continue;
+    }
+    if (results.length === 0) continue;
+
+    await storePotResults(results);
+    console.log(
+      `Pot: GW ${gw} snapshotted (${results.length} members, top score ${results[0].points}${isFinal ? "" : ", provisional"})`,
+    );
+  }
+
+  // Keep ranks consistent across all stored rows, including any left over
+  // from members who are no longer active.
+  await recalculatePotRankings();
+
+  if (failedIds.length > 0) {
+    throw new Error(`Failed to fetch history for entries ${failedIds.join(", ")}`);
   }
 }

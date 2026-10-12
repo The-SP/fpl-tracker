@@ -1,4 +1,5 @@
 import { db } from "./db"
+import { competitionRank } from "./ranking"
 
 export interface PotMember {
   entry_id: number
@@ -90,14 +91,17 @@ export async function seedPotMembersIfEmpty(
   members: { entry_id: number; entry_name: string; player_name: string }[]
 ): Promise<void> {
   const existing = await getPotMembers()
-  if (existing.length > 0) return
+  if (existing.length > 0 || members.length === 0) return
 
-  for (const m of members) {
-    await db.execute({
-      sql: "INSERT INTO pot_members (entry_id, entry_name, player_name, active) VALUES (?, ?, ?, 1)",
+  // One transaction, and OR IGNORE so a concurrent seed of the same roster
+  // cannot fail on the primary key.
+  await db.batch(
+    members.map((m) => ({
+      sql: "INSERT OR IGNORE INTO pot_members (entry_id, entry_name, player_name, active) VALUES (?, ?, ?, 1)",
       args: [m.entry_id, m.entry_name, m.player_name],
-    })
-  }
+    })),
+    "write"
+  )
 }
 
 export async function updatePotMemberNames(
@@ -111,76 +115,91 @@ export async function updatePotMemberNames(
   })
 }
 
-export async function potResultExists(
-  gw: number,
-  entryId: number
-): Promise<boolean> {
-  const result = await db.execute({
-    sql: "SELECT 1 FROM pot_gw_results WHERE gw = ? AND entry_id = ?",
-    args: [gw, entryId],
-  })
-  return result.rows.length > 0
+/**
+ * Stored finality per gameweek and entry, in one query, so the snapshot job
+ * can decide which gameweeks are already complete and final.
+ */
+export async function getStoredPotResultStatus(): Promise<
+  Map<number, Map<number, boolean>>
+> {
+  const result = await db.execute(
+    "SELECT gw, entry_id, is_final FROM pot_gw_results"
+  )
+  const byGw = new Map<number, Map<number, boolean>>()
+  for (const row of result.rows as DatabaseRow[]) {
+    const gw = Number(row.gw)
+    if (!byGw.has(gw)) byGw.set(gw, new Map())
+    byGw.get(gw)!.set(Number(row.entry_id), !!row.is_final)
+  }
+  return byGw
 }
 
-export async function potResultIsFinal(
-  gw: number,
-  entryId: number,
-): Promise<boolean> {
-  const result = await db.execute({
-    sql: "SELECT is_final FROM pot_gw_results WHERE gw = ? AND entry_id = ?",
-    args: [gw, entryId],
-  })
-  return result.rows.length > 0 && !!result.rows[0].is_final
+/** Upsert one gameweek's results atomically. */
+export async function storePotResults(results: PotGwResult[]): Promise<void> {
+  if (results.length === 0) return
+
+  await db.batch(
+    results.map((result) => ({
+      sql: `INSERT INTO pot_gw_results (gw, entry_id, points, rank, is_winner, chip, is_final)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(gw, entry_id) DO UPDATE SET
+              points = excluded.points,
+              rank = excluded.rank,
+              is_winner = excluded.is_winner,
+              chip = excluded.chip,
+              is_final = excluded.is_final`,
+      args: [
+        result.gw,
+        result.entry_id,
+        result.points,
+        result.rank,
+        result.is_winner ? 1 : 0,
+        result.chip,
+        result.is_final ? 1 : 0,
+      ],
+    })),
+    "write"
+  )
 }
 
-export async function storePotResult(result: PotGwResult): Promise<void> {
-  await db.execute({
-    sql: `INSERT INTO pot_gw_results (gw, entry_id, points, rank, is_winner, chip, is_final)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(gw, entry_id) DO UPDATE SET
-            points = excluded.points,
-            rank = excluded.rank,
-            is_winner = excluded.is_winner,
-            chip = excluded.chip,
-            is_final = excluded.is_final`,
-    args: [
-      result.gw,
-      result.entry_id,
-      result.points,
-      result.rank,
-      result.is_winner ? 1 : 0,
-      result.chip,
-      result.is_final ? 1 : 0,
-    ],
-  })
-}
-
+/**
+ * Recompute rank and winner flags for every stored gameweek, writing only the
+ * rows whose values changed. Keeps older rows consistent with the current
+ * ranking rules.
+ */
 export async function recalculatePotRankings(): Promise<void> {
   const result = await db.execute(
-    "SELECT gw, entry_id, points FROM pot_gw_results ORDER BY gw ASC, points DESC"
+    "SELECT gw, entry_id, points, rank, is_winner FROM pot_gw_results"
   )
-  const byGw = new Map<number, { entryId: number; points: number }[]>()
+  const byGw = new Map<
+    number,
+    { entryId: number; points: number; rank: number; isWinner: boolean }[]
+  >()
 
   for (const row of result.rows as DatabaseRow[]) {
     const gw = Number(row.gw)
     if (!byGw.has(gw)) byGw.set(gw, [])
-    byGw.get(gw)!.push({ entryId: Number(row.entry_id), points: Number(row.points) })
+    byGw.get(gw)!.push({
+      entryId: Number(row.entry_id),
+      points: Number(row.points),
+      rank: Number(row.rank),
+      isWinner: !!row.is_winner,
+    })
   }
 
-  for (const [gw, rows] of byGw.entries()) {
-    const topScore = rows[0]?.points
-    for (let index = 0; index < rows.length; index++) {
-      const row = rows[index]
-      const previousRow = rows[index - 1]
-      const rank = index > 0 && previousRow.points === row.points
-        ? index
-        : index + 1
-      await db.execute({
+  const updates: { sql: string; args: number[] }[] = []
+  for (const [gw, rows] of byGw) {
+    for (const { item, rank } of competitionRank(rows, (row) => row.points)) {
+      const isWinner = rank === 1
+      if (item.rank === rank && item.isWinner === isWinner) continue
+      updates.push({
         sql: "UPDATE pot_gw_results SET rank = ?, is_winner = ? WHERE gw = ? AND entry_id = ?",
-        args: [rank, row.points === topScore ? 1 : 0, gw, row.entryId],
+        args: [rank, isWinner ? 1 : 0, gw, item.entryId],
       })
     }
   }
+
+  if (updates.length > 0) await db.batch(updates, "write")
 }
 
 export async function getAllPotResultsByGw(): Promise<
@@ -191,7 +210,7 @@ export async function getAllPotResultsByGw(): Promise<
             r.points, r.rank, r.is_winner, r.chip, r.is_final
      FROM pot_gw_results r
      JOIN pot_members m ON m.entry_id = r.entry_id
-     ORDER BY r.gw DESC, r.rank ASC`
+     ORDER BY r.gw DESC, r.rank ASC, m.player_name ASC`
   )
 
   const byGw = new Map<number, PotGwResult[]>()
@@ -231,21 +250,15 @@ export async function getOverallPotResults(): Promise<PotOverallResult[]> {
     entry_name: nullableString(row.entry_name),
     player_name: nullableString(row.player_name),
     points: Number(row.points),
-    rank: 0,
     gws_played: Number(row.gws_played),
     latest_gw: Number(row.latest_gw),
     is_final: !!row.is_final,
   }))
 
-  let currentRank = 1
-  for (let index = 0; index < rows.length; index++) {
-    if (index > 0 && rows[index - 1].points !== rows[index].points) {
-      currentRank = index + 1
-    }
-    rows[index].rank = currentRank
-  }
-
-  return rows
+  return competitionRank(rows, (row) => row.points).map(({ item, rank }) => ({
+    ...item,
+    rank,
+  }))
 }
 
 export async function getLastSettlement(): Promise<PotSettlement | null> {
@@ -260,6 +273,18 @@ export async function getLastSettlement(): Promise<PotSettlement | null> {
   }
 }
 
+/** The most recent gameweek whose stored results are all final. */
+export async function getLatestFinalPotGw(): Promise<number | null> {
+  const result = await db.execute(
+    `SELECT gw FROM pot_gw_results
+     GROUP BY gw
+     HAVING MIN(is_final) = 1
+     ORDER BY gw DESC
+     LIMIT 1`
+  )
+  return result.rows.length > 0 ? Number(result.rows[0].gw) : null
+}
+
 export async function settlePot(throughGw: number): Promise<void> {
   await db.execute({
     sql: "INSERT INTO pot_settlements (settled_through_gw, settled_at) VALUES (?, ?)",
@@ -272,16 +297,17 @@ export async function settlePot(throughGw: number): Promise<void> {
  * settled_through_gw, or 0 if never settled.
  * Weekly pot size is derived per-GW as feePerMember * (members who played
  * that GW), so it scales correctly even if the roster changes over time.
- * Ties split the pot evenly among that GW's winners.
+ * Ties split the pot evenly among that GW's winners. Gameweeks with any
+ * provisional row are excluded.
  */
-export async function getPotBalances(
+export function computePotBalances(
+  byGw: Map<number, PotGwResult[]>,
   sinceGw: number,
   feePerMember: number
-): Promise<PotBalance[]> {
-  const byGw = await getAllPotResultsByGw()
+): PotBalance[] {
   const balances = new Map<number, PotBalance>()
 
-  for (const [gw, rows] of byGw) {
+  for (const [gw, rows] of [...byGw].sort(([a], [b]) => b - a)) {
     if (rows.some((row) => !row.is_final)) continue
     if (gw <= sinceGw) continue
 
@@ -315,4 +341,11 @@ export async function getPotBalances(
   }
 
   return Array.from(balances.values()).sort((a, b) => b.net - a.net)
+}
+
+export async function getPotBalances(
+  sinceGw: number,
+  feePerMember: number
+): Promise<PotBalance[]> {
+  return computePotBalances(await getAllPotResultsByGw(), sinceGw, feePerMember)
 }

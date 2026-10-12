@@ -1,6 +1,12 @@
 export interface Migration {
   name: string
-  sql: string
+  /**
+   * Statements to run in one transaction. Use an array for new migrations.
+   * A plain string is the legacy format used by the first migrations; it is
+   * split on ";", so it must not contain semicolons inside strings, triggers,
+   * or other compound statements.
+   */
+  sql: string | string[]
 }
 
 export const MIGRATIONS: Migration[] = [

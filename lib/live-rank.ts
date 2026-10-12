@@ -1,4 +1,4 @@
-import { fetchBootstrap, fetchLeagueStandings } from "./fpl";
+import { fetchBootstrap, fetchLeagueStandings, getCurrentGameweek } from "./fpl";
 import { TRACKED_LEAGUES, USER_ENTRY_ID } from "@/config/leagues";
 
 export interface LiveRankResult {
@@ -15,31 +15,27 @@ export interface LiveRankResult {
   }>;
 }
 
-async function getCurrentGameweek(): Promise<number> {
-  const bootstrap = await fetchBootstrap();
-
-  const activeGw = bootstrap.events
-    .filter((event) => !event.finished)
-    .sort((a, b) => a.id - b.id)[0];
-
-  return activeGw?.id ?? bootstrap.events[bootstrap.events.length - 1]?.id ?? 1;
+async function fetchCurrentGameweek(): Promise<number> {
+  return getCurrentGameweek(await fetchBootstrap());
 }
 
 /**
- * Get live rank for a specific league
+ * Get live rank for a specific league. Pass `currentGw` when checking several
+ * leagues so bootstrap data is only fetched once.
  */
 export async function getLiveRankForLeague(
-  leagueId: number
+  leagueId: number,
+  currentGw?: number
 ): Promise<LiveRankResult> {
   const league = TRACKED_LEAGUES.find((l) => l.id === leagueId);
   if (!league) {
     throw new Error(`League ${leagueId} not found in tracked leagues`);
   }
 
-  const currentGw = await getCurrentGameweek();
-
-  // Fetch standings
-  const standings = await fetchLeagueStandings(leagueId);
+  const [gw, standings] = await Promise.all([
+    currentGw ?? fetchCurrentGameweek(),
+    fetchLeagueStandings(leagueId),
+  ]);
 
   // Sort by event_total descending (current gameweek live score)
   const sorted = [...standings].sort((a, b) => {
@@ -50,15 +46,11 @@ export async function getLiveRankForLeague(
     return b.total - a.total;
   });
 
-  // Find user's rank
-  const userEntry = sorted.find((s) => s.entry === USER_ENTRY_ID);
-  if (!userEntry) {
+  const userIndex = sorted.findIndex((s) => s.entry === USER_ENTRY_ID);
+  if (userIndex === -1) {
     throw new Error(`User (entry ${USER_ENTRY_ID}) not found in league ${leagueId}`);
   }
 
-  const userRank = sorted.findIndex((s) => s.entry === USER_ENTRY_ID) + 1;
-
-  // Get top 5
   const top5 = sorted.slice(0, 5).map((entry, index) => ({
     rank: index + 1,
     entry_id: entry.entry,
@@ -69,28 +61,25 @@ export async function getLiveRankForLeague(
   return {
     league_id: leagueId,
     league_name: league.name,
-    my_rank: userRank,
-    my_points: userEntry.event_total,
-    current_gw: currentGw,
+    my_rank: userIndex + 1,
+    my_points: sorted[userIndex].event_total,
+    current_gw: gw,
     top5,
   };
 }
 
 /**
- * Get live rank for all tracked leagues
+ * Get live rank for all tracked leagues, in parallel
  */
 export async function getLiveRankForAllLeagues(): Promise<LiveRankResult[]> {
-  const results: LiveRankResult[] = [];
+  const currentGw = await fetchCurrentGameweek();
+  const results = await Promise.allSettled(
+    TRACKED_LEAGUES.map((league) => getLiveRankForLeague(league.id, currentGw))
+  );
 
-  for (const league of TRACKED_LEAGUES) {
-    try {
-      const result = await getLiveRankForLeague(league.id);
-      results.push(result);
-    } catch (error) {
-      console.error(`Failed to get live rank for league ${league.id}:`, error);
-      // Continue with other leagues
-    }
-  }
-
-  return results;
+  return results.flatMap((result, index) => {
+    if (result.status === "fulfilled") return [result.value];
+    console.error(`Failed to get live rank for league ${TRACKED_LEAGUES[index].id}:`, result.reason);
+    return [];
+  });
 }

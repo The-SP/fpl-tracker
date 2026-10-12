@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { RankBadge } from "@/components/rank-badge";
+import { fplEventUrl } from "@/lib/fpl";
 import type { LiveRankResult } from "@/lib/live-rank";
 
 export function CheckLiveRankButton() {
@@ -33,17 +34,17 @@ export function CheckLiveRankButton() {
       <button
         onClick={handleCheckLiveRank}
         disabled={loading}
-        className="w-full rounded-lg bg-[#1B5E3F] py-3 font-mono text-sm font-semibold uppercase tracking-wide text-white transition hover:bg-[#164D33] disabled:opacity-60"
+        className="w-full rounded-lg bg-turf-solid py-3 font-mono text-sm font-semibold uppercase tracking-wide text-white transition hover:bg-turf-solid-hover disabled:opacity-60"
       >
         {loading ? "Checking…" : liveRanks ? "Refresh live rank" : "Check live rank now"}
       </button>
 
       {currentGw !== null && (
-        <div className="rounded-lg border border-[#D8DCD3] bg-[#F5F6F1] px-3 py-2 text-right dark:border-[#24352B] dark:bg-[#111C17]">
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5B6B62] dark:text-[#8FA095]">
+        <div className="rounded-lg border border-line bg-panel px-3 py-2 text-right">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-muted">
             Current GW
           </span>
-          <div className="mt-1 font-mono text-lg font-semibold text-[#1B5E3F] dark:text-[#3FA968]">
+          <div className="mt-1 font-mono text-lg font-semibold text-turf">
             {currentGw}
           </div>
         </div>
@@ -62,18 +63,18 @@ export function CheckLiveRankButton() {
         <div>
           <div className="mb-3 flex items-center gap-2">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#3FA968] opacity-75 motion-reduce:animate-none" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#1B5E3F]" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-turf opacity-75 motion-reduce:animate-none" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-turf-solid" />
             </span>
-            <p className="font-mono text-xs uppercase tracking-wide text-[#5B6B62] dark:text-[#8FA095]">
+            <p className="font-mono text-xs uppercase tracking-wide text-ink-muted">
               Live — bonus points not yet final
             </p>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-[#D8DCD3] dark:border-[#24352B]">
+          <div className="overflow-x-auto rounded-lg border border-line">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-[#D8DCD3] font-mono text-[11px] uppercase tracking-wider text-[#5B6B62] dark:border-[#24352B] dark:text-[#8FA095]">
+                <tr className="border-b border-line font-mono text-[11px] uppercase tracking-wider text-ink-muted">
                   <th className="px-4 py-3 text-left font-medium">League</th>
                   <th className="px-4 py-3 text-center font-medium">Rank</th>
                   <th className="px-4 py-3 text-center font-medium">Points</th>
@@ -84,7 +85,7 @@ export function CheckLiveRankButton() {
                 {liveRanks.map((league) => (
                   <tr
                     key={league.league_id}
-                    className="border-b border-[#EAEBE4] align-top last:border-0 dark:border-[#1B241D]"
+                    className="border-b border-line-soft align-top last:border-0"
                   >
                     <td className="px-4 py-4 font-medium">{league.league_name}</td>
                     <td className="px-4 py-4 text-center">
@@ -99,14 +100,14 @@ export function CheckLiveRankButton() {
                           <li key={manager.entry_id} className="flex items-center gap-2 text-sm">
                             <RankBadge rank={manager.rank} size="sm" />
                             <a
-                              href={`https://fantasy.premierleague.com/en/entry/${manager.entry_id}/event/${league.current_gw}`}
+                              href={fplEventUrl(manager.entry_id, league.current_gw)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[#1B5E3F] hover:underline dark:text-[#3FA968]"
+                              className="text-turf hover:underline"
                             >
                               {manager.name}
                             </a>
-                            <span className="font-mono text-xs text-[#5B6B62] dark:text-[#8FA095]">
+                            <span className="font-mono text-xs text-ink-muted">
                               {manager.points}pts
                             </span>
                           </li>

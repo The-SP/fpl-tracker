@@ -7,6 +7,8 @@ export interface BootstrapEvent {
   average_entry_score: number;
   finished: boolean;
   data_checked: boolean;
+  is_current: boolean;
+  is_next: boolean;
   highest_scoring_entry?: number;
   stats?: Array<{
     name: string;
@@ -90,17 +92,51 @@ export interface EntrySummary {
   player_last_name: string;
 }
 
+const FPL_SITE_URL = "https://fantasy.premierleague.com/en";
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_RETRIES = 2;
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+/**
+ * GET a JSON resource from the FPL API with a per-attempt timeout and a small
+ * exponential backoff for rate limits, server errors, and network failures.
+ */
+async function fetchFplJson<T>(path: string, description: string): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
+    }
+
+    try {
+      const response = await fetch(`${BASE_URL}${path}`, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (response.ok) return (await response.json()) as T;
+
+      lastError = new Error(
+        `Failed to fetch ${description}: ${response.status} ${response.statusText}`
+      );
+      if (!isRetryableStatus(response.status)) break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to fetch ${description}`);
+}
+
 /**
  * Fetch bootstrap-static data to get event info
  */
-export async function fetchBootstrap(): Promise<BootstrapData> {
-  const response = await fetch(`${BASE_URL}/bootstrap-static/`);
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch bootstrap data: ${response.status} ${response.statusText}`
-    );
-  }
-  return response.json();
+export function fetchBootstrap(): Promise<BootstrapData> {
+  return fetchFplJson("/bootstrap-static/", "bootstrap data");
 }
 
 /**
@@ -111,17 +147,10 @@ export async function fetchLeagueStandings(leagueId: number): Promise<StandingsE
   let pageNum = 1;
 
   while (true) {
-    const response = await fetch(
-      `${BASE_URL}/leagues-classic/${leagueId}/standings/?page_standings=${pageNum}`
+    const data = await fetchFplJson<StandingsResponse>(
+      `/leagues-classic/${leagueId}/standings/?page_standings=${pageNum}`,
+      `standings for league ${leagueId}`
     );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch standings for league ${leagueId}: ${response.status} ${response.statusText}`
-      );
-    }
-
-    const data: StandingsResponse = await response.json();
     allResults.push(...data.standings.results);
 
     // If this page is empty or there's no next page, we're done
@@ -138,16 +167,8 @@ export async function fetchLeagueStandings(leagueId: number): Promise<StandingsE
 /**
  * Fetch entry history for a single manager
  */
-export async function fetchEntryHistory(entryId: number): Promise<EntryHistory> {
-  const response = await fetch(`${BASE_URL}/entry/${entryId}/history/`);
-
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch history for entry ${entryId}: ${response.status} ${response.statusText}`
-    );
-  }
-
-  return response.json();
+export function fetchEntryHistory(entryId: number): Promise<EntryHistory> {
+  return fetchFplJson(`/entry/${entryId}/history/`, `history for entry ${entryId}`);
 }
 
 /**
@@ -155,16 +176,54 @@ export async function fetchEntryHistory(entryId: number): Promise<EntryHistory> 
  * Used to resolve display names for entries pulled in manually
  * (e.g. someone who isn't a member of the source league).
  */
-export async function fetchEntrySummary(entryId: number): Promise<EntrySummary> {
-  const response = await fetch(`${BASE_URL}/entry/${entryId}/`);
+export function fetchEntrySummary(entryId: number): Promise<EntrySummary> {
+  return fetchFplJson(`/entry/${entryId}/`, `entry summary for ${entryId}`);
+}
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch entry summary for ${entryId}: ${response.status} ${response.statusText}`
-    );
+/**
+ * Fetch histories for many entries with bounded concurrency. Failed entries are
+ * reported separately so callers can decide whether partial data is usable.
+ */
+export async function fetchEntryHistories(
+  entryIds: number[],
+  concurrency = 10
+): Promise<{ histories: Map<number, EntryHistory>; failedIds: number[] }> {
+  const histories = new Map<number, EntryHistory>();
+  const failedIds: number[] = [];
+  const uniqueIds = [...new Set(entryIds)];
+
+  for (let i = 0; i < uniqueIds.length; i += concurrency) {
+    const batch = uniqueIds.slice(i, i + concurrency);
+    const results = await Promise.allSettled(batch.map((id) => fetchEntryHistory(id)));
+    results.forEach((result, index) => {
+      const entryId = batch[index];
+      if (result.status === "fulfilled") {
+        histories.set(entryId, result.value);
+      } else {
+        failedIds.push(entryId);
+        console.error(`Failed to fetch history for entry ${entryId}:`, result.reason);
+      }
+    });
   }
 
-  return response.json();
+  return { histories, failedIds };
+}
+
+/**
+ * The gameweek currently being played, or the most recently started one
+ * between gameweeks. Falls back to the first gameweek before the season.
+ */
+export function getCurrentGameweek(bootstrap: BootstrapData): number {
+  const current = bootstrap.events.find((event) => event.is_current);
+  if (current) return current.id;
+
+  const lastFinished = bootstrap.events.filter((event) => event.finished).at(-1);
+  return lastFinished?.id ?? bootstrap.events[0]?.id ?? 1;
+}
+
+/** Public FPL page for a manager's team in one gameweek. */
+export function fplEventUrl(entryId: number, gw: number): string {
+  return `${FPL_SITE_URL}/entry/${entryId}/event/${gw}`;
 }
 
 /**

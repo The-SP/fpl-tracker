@@ -168,40 +168,9 @@ export async function getLatestSnapshots(): Promise<GWSnapshot[]> {
 }
 
 /**
- * Get the highest points scored in any gameweek per league
+ * Keys ("leagueId:gw") of every stored snapshot, in one query.
  */
-export async function getHighestPointsPerLeague(): Promise<
-  Map<number, number>
-> {
-  try {
-    const map = new Map<number, number>()
-    const snapshots = await getLatestSnapshots()
-    snapshots.forEach((snapshot) => {
-      const firstPlace = snapshot.top5.find((manager) => manager.rank === 1)
-      if (firstPlace) map.set(snapshot.league_id, firstPlace.points)
-    })
-    return map
-  } catch (error) {
-    console.error("Failed to get highest points per league:", error)
-    throw error
-  }
-}
-
-/**
- * Check if a snapshot already exists for a league and gameweek
- */
-export async function snapshotExists(
-  leagueId: number,
-  gw: number
-): Promise<boolean> {
-  try {
-    const result = await db.execute(
-      `SELECT 1 FROM gw_snapshots WHERE league_id = ? AND gw = ?`,
-      [leagueId, gw]
-    )
-    return result.rows.length > 0
-  } catch (error) {
-    console.error(`Failed to check snapshot existence:`, error)
-    throw error
-  }
+export async function getSnapshotKeys(): Promise<Set<string>> {
+  const result = await db.execute("SELECT league_id, gw FROM gw_snapshots")
+  return new Set(result.rows.map((row) => `${row.league_id}:${row.gw}`))
 }

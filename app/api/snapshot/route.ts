@@ -4,6 +4,9 @@ import { NextResponse } from "next/server";
 
 const SNAPSHOT_COOLDOWN_HOURS = 3;
 
+// A first run fetches every tracked league member's history.
+export const maxDuration = 60;
+
 async function handleSnapshot() {
   try {
     await initializeDatabase();

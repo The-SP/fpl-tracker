@@ -22,7 +22,7 @@ export function FetchSnapshotButton() {
         throw new Error(data.details || data.error || "Failed to fetch snapshot data");
       }
 
-      setMessage("New finalized gameweeks fetched.");
+      setMessage(data.skipped ? "Gameweeks were checked recently." : "New finalized gameweeks fetched.");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch snapshot data");
@@ -37,11 +37,11 @@ export function FetchSnapshotButton() {
         type="button"
         onClick={handleFetch}
         disabled={loading}
-        className="rounded-lg bg-[#1B5E3F] px-4 py-2 font-mono text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-[#164D33] disabled:opacity-60"
+        className="rounded-lg bg-turf-solid px-4 py-2 font-mono text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-turf-solid-hover disabled:opacity-60"
       >
         {loading ? "Fetching…" : "Fetch latest gameweek"}
       </button>
-      {message && <p className="font-mono text-xs text-[#1B5E3F] dark:text-[#3FA968]">{message}</p>}
+      {message && <p className="font-mono text-xs text-turf">{message}</p>}
       {error && <p className="font-mono text-xs text-red-700 dark:text-red-400">{error}</p>}
     </div>
   );

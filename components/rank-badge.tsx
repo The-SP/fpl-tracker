@@ -15,10 +15,10 @@ export function RankBadge({ rank, size = "md", className }: RankBadgeProps) {
   const tier = rank <= 3 ? "gold" : rank <= 10 ? "turf" : "neutral";
 
   const tierStyles = {
-    gold: "border-[#B7791F] text-[#8A5A0F] dark:border-[#E4B448] dark:text-[#E4B448]",
-    turf: "border-[#1B5E3F] text-[#1B5E3F] dark:border-[#3FA968] dark:text-[#3FA968]",
+    gold: "border-gold-line text-gold",
+    turf: "border-turf text-turf",
     neutral:
-      "border-[#D8DCD3] text-[#5B6B62] dark:border-[#2A3B31] dark:text-[#8FA095]",
+      "border-line text-ink-muted",
   }[tier];
 
   const sizeStyles =

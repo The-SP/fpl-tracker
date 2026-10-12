@@ -3,6 +3,8 @@ import { initializeDatabase } from "@/lib/db"
 import { getAllPotResultsByGw } from "@/lib/pot-db"
 
 export const runtime = "nodejs"
+// Read winners per request; otherwise the image is frozen at build time.
+export const dynamic = "force-dynamic"
 export const alt = "FPL Tracker weekly pot winners"
 export const size = { width: 1200, height: 630 }
 export const contentType = "image/png"
@@ -46,7 +48,14 @@ export default async function OpenGraphImage() {
           <div style={{ display: "flex", flexDirection: "column" }}>
             {winners.length > 0 ? winners.map((winner) => (
               <div key={`${winner.gw}-${winner.entry_id}`} style={{ borderTop: "1px solid #D8DCD3", display: "flex", fontSize: 24, padding: "18px 24px" }}>
-                <div style={{ display: "flex", width: 180 }}>GW {winner.gw}</div>
+                <div style={{ display: "flex", flexDirection: "column", width: 180 }}>
+                  <div style={{ display: "flex" }}>GW {winner.gw}</div>
+                  {!winner.is_final && (
+                    <div style={{ color: "#B45309", display: "flex", fontSize: 15, fontWeight: 700, letterSpacing: 2, marginTop: 4 }}>
+                      LIVE
+                    </div>
+                  )}
+                </div>
                 <div style={{ display: "flex", flex: 1, flexDirection: "column" }}>
                   <div style={{ display: "flex" }}>{winner.player_name}</div>
                   <div style={{ color: "#5B6B62", display: "flex", fontSize: 17, marginTop: 4 }}>{winner.entry_name}</div>

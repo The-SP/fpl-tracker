@@ -1,5 +1,5 @@
 import { db } from "./index"
-import { MIGRATIONS } from "./migration"
+import { MIGRATIONS, type Migration } from "./migration"
 
 let initializationPromise: Promise<void> | undefined
 
@@ -21,6 +21,13 @@ export function initializeDatabase(): Promise<void> {
   return initializationPromise
 }
 
+function migrationStatements(migration: Migration): string[] {
+  const statements = Array.isArray(migration.sql)
+    ? migration.sql
+    : migration.sql.split(";")
+  return statements.map((sql) => sql.trim()).filter(Boolean)
+}
+
 async function runMigrations(): Promise<void> {
   try {
     await db.execute(`
@@ -38,11 +45,7 @@ async function runMigrations(): Promise<void> {
 
       await db.batch(
         [
-          ...migration.sql
-            .split(";")
-            .map((sql) => sql.trim())
-            .filter(Boolean)
-            .map((sql) => ({ sql, args: [] })),
+          ...migrationStatements(migration).map((sql) => ({ sql, args: [] })),
           {
             sql: "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
             args: [migration.name, new Date().toISOString()],

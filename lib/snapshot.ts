@@ -1,12 +1,14 @@
 import {
   fetchBootstrap,
   fetchLeagueStandings,
-  fetchEntryHistory,
+  fetchEntryHistories,
   getGameweekPointsFromHistory,
+  type EntryHistory,
+  type StandingsEntry,
 } from "./fpl";
 import {
   storeSnapshot,
-  snapshotExists,
+  getSnapshotKeys,
   initializeDatabase,
   type GWSnapshot,
   type Top5Manager,
@@ -14,198 +16,146 @@ import {
 import { TRACKED_LEAGUES, USER_ENTRY_ID } from "@/config/leagues";
 
 /**
- * Fetch all finalized gameweeks that need snapshotting
+ * Finalized gameweeks that have no stored snapshot yet, grouped by league.
  */
-export async function getFinalizedGameweeks(): Promise<number[]> {
-  const bootstrap = await fetchBootstrap();
-
-  return bootstrap.events
+export async function getGameweeksToSnapshot(): Promise<Map<number, number[]>> {
+  const [bootstrap, existing] = await Promise.all([fetchBootstrap(), getSnapshotKeys()]);
+  const finalizedGws = bootstrap.events
     .filter((event) => event.finished && event.data_checked)
     .map((event) => event.id);
-}
 
-/**
- * Get gameweeks that need snapshotting (finalized but not in DB)
- */
-export async function getGameweeksToSnapshot(): Promise<
-  Array<{ leagueId: number; gw: number }>
-> {
-  const finalizedGws = await getFinalizedGameweeks();
-  const toSnapshot: Array<{ leagueId: number; gw: number }> = [];
-
-  for (const gw of finalizedGws) {
-    for (const league of TRACKED_LEAGUES) {
-      const exists = await snapshotExists(league.id, gw);
-      if (!exists) {
-        toSnapshot.push({ leagueId: league.id, gw });
-      }
-    }
+  const toSnapshot = new Map<number, number[]>();
+  for (const league of TRACKED_LEAGUES) {
+    const gws = finalizedGws.filter((gw) => !existing.has(`${league.id}:${gw}`));
+    if (gws.length > 0) toSnapshot.set(league.id, gws);
   }
-
   return toSnapshot;
 }
 
-interface ManagerWithPoints {
-  entry_id: number;
-  name: string;
-  points: number;
-  total_points: number;
-  rank?: number;
-}
-
 /**
- * Snapshot a single gameweek for a single league
+ * Build a league's snapshot for one gameweek from already-fetched data.
+ * Returns null when the user has no result in that gameweek.
  */
-export async function snapshotLeagueGameweek(
+export function buildLeagueSnapshot(
   leagueId: number,
-  gw: number
-): Promise<GWSnapshot | null> {
-  console.log(`Snapshotting league ${leagueId} for GW ${gw}...`);
+  gw: number,
+  standings: StandingsEntry[],
+  histories: Map<number, EntryHistory>
+): GWSnapshot | null {
+  // Standings pages can shift while paging, so an entry may appear twice.
+  const uniqueEntries = [...new Map(standings.map((s) => [s.entry, s])).values()];
 
-  // Fetch all standings pages to get full member list
-  const standings = await fetchLeagueStandings(leagueId);
-
-  if (!standings.some((entry) => entry.entry === USER_ENTRY_ID)) {
-    console.warn(
-      `  Skipping league ${leagueId} for GW ${gw}: user entry ${USER_ENTRY_ID} is not in this league.`
-    );
-    return null;
-  }
-
-  const entryIds = standings.map((s) => s.entry);
-
-  // Deduplicate entry IDs
-  const uniqueEntryIds = [...new Set(entryIds)];
-
-  console.log(
-    `  Found ${uniqueEntryIds.length} unique managers in league ${leagueId}`
-  );
-
-  // Fetch history for each manager with concurrency control
-  const managersWithPoints: ManagerWithPoints[] = [];
-  const CONCURRENCY = 10;
-
-  for (let i = 0; i < uniqueEntryIds.length; i += CONCURRENCY) {
-    const batch = uniqueEntryIds.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(
-      batch.map(async (entryId) => {
-        try {
-          const history = await fetchEntryHistory(entryId);
-          const gwPoints = getGameweekPointsFromHistory(history, gw);
-
-          if (!gwPoints) {
-            return null;
-          }
-
-          const standingsEntry = standings.find((s) => s.entry === entryId);
-          return {
-            entry_id: entryId,
-            name: standingsEntry?.entry_name || `Entry ${entryId}`,
+  const managers = uniqueEntries.flatMap((entry) => {
+    const history = histories.get(entry.entry);
+    const gwPoints = history ? getGameweekPointsFromHistory(history, gw) : null;
+    return gwPoints
+      ? [
+          {
+            entry_id: entry.entry,
+            name: entry.entry_name || `Entry ${entry.entry}`,
             points: gwPoints.points,
             total_points: gwPoints.total_points,
-          };
-        } catch (error) {
-          console.error(`  Failed to fetch history for entry ${entryId}:`, error);
-          return null;
-        }
-      })
-    );
-
-    managersWithPoints.push(...results.filter((r) => r !== null));
-  }
+          },
+        ]
+      : [];
+  });
 
   // Sort by points descending, then by total_points descending for tiebreaker
-  managersWithPoints.sort((a, b) => {
-    if (a.points !== b.points) {
-      return b.points - a.points;
-    }
-    return b.total_points - a.total_points;
-  });
+  managers.sort((a, b) => b.points - a.points || b.total_points - a.total_points);
 
-  // Assign ranks based on sorted order
-  managersWithPoints.forEach((manager, index) => {
-    manager.rank = index + 1;
-  });
+  const userIndex = managers.findIndex((m) => m.entry_id === USER_ENTRY_ID);
+  if (userIndex === -1) return null;
 
-  // Find user's rank and points
-  const userData = managersWithPoints.find((m) => m.entry_id === USER_ENTRY_ID);
-  if (!userData) {
-    console.warn(
-      `  Skipping league ${leagueId} for GW ${gw}: user entry ${USER_ENTRY_ID} was not present in the standings after history lookup.`
-    );
-    return null;
-  }
-
-  // Get top 5 managers
-  const top5: Top5Manager[] = managersWithPoints.slice(0, 5).map((m) => ({
+  const top5: Top5Manager[] = managers.slice(0, 5).map((m, index) => ({
     entry_id: m.entry_id,
     name: m.name,
     points: m.points,
-    rank: m.rank!,
+    rank: index + 1,
   }));
 
-  const snapshot: GWSnapshot = {
+  return {
     league_id: leagueId,
     gw,
-    my_rank: userData.rank!,
-    my_points: userData.points,
+    my_rank: userIndex + 1,
+    my_points: managers[userIndex].points,
     top5,
     fetched_at: new Date().toISOString(),
   };
-
-  // Store in database
-  await storeSnapshot(snapshot);
-  console.log(`  ✓ Snapshot stored: rank ${userData.rank}, points ${userData.points}`);
-
-  return snapshot;
 }
 
 /**
- * Run the full snapshot job for all finalized gameweeks
+ * Snapshot all missing gameweeks for one league. Every member's history is
+ * fetched once and reused across gameweeks. If any history fails, nothing is
+ * stored for the league: a missing manager would permanently skew the rank,
+ * since stored gameweeks are never revisited.
+ */
+async function snapshotLeague(
+  leagueId: number,
+  gws: number[],
+  historyCache: Map<number, EntryHistory>
+): Promise<void> {
+  const standings = await fetchLeagueStandings(leagueId);
+
+  if (!standings.some((entry) => entry.entry === USER_ENTRY_ID)) {
+    console.warn(`  Skipping league ${leagueId}: user entry ${USER_ENTRY_ID} is not in this league.`);
+    return;
+  }
+
+  const uncached = standings.map((s) => s.entry).filter((id) => !historyCache.has(id));
+  const { histories, failedIds } = await fetchEntryHistories(uncached);
+  histories.forEach((history, entryId) => historyCache.set(entryId, history));
+
+  if (failedIds.length > 0) {
+    throw new Error(
+      `Failed to fetch ${failedIds.length} manager histories for league ${leagueId}`
+    );
+  }
+
+  for (const gw of gws) {
+    const snapshot = buildLeagueSnapshot(leagueId, gw, standings, historyCache);
+    if (!snapshot) {
+      console.warn(`  Skipping league ${leagueId} for GW ${gw}: no result for user entry ${USER_ENTRY_ID}.`);
+      continue;
+    }
+
+    await storeSnapshot(snapshot);
+    console.log(`  ✓ GW ${gw} stored: rank ${snapshot.my_rank}, points ${snapshot.my_points}`);
+  }
+}
+
+/**
+ * Run the full snapshot job for all finalized gameweeks. Leagues are processed
+ * independently; if any league fails, the job throws after the others finish
+ * so the run is not recorded as successful and stays retryable.
  */
 export async function runSnapshotJob(): Promise<void> {
-  try {
-    await initializeDatabase();
+  await initializeDatabase();
 
-    const toSnapshot = await getGameweeksToSnapshot();
-
-    if (toSnapshot.length === 0) {
-      console.log("No new gameweeks to snapshot");
-      return;
-    }
-
-    console.log(`Found ${toSnapshot.length} gameweek(s) to snapshot`);
-
-    // Deduplicate by gameweek to process each GW only once across all leagues
-    const gwsByLeague = new Map<number, number[]>();
-    for (const { leagueId, gw } of toSnapshot) {
-      if (!gwsByLeague.has(leagueId)) {
-        gwsByLeague.set(leagueId, []);
-      }
-      gwsByLeague.get(leagueId)!.push(gw);
-    }
-
-    // Process each league
-    for (const [leagueId, gws] of gwsByLeague) {
-      const league = TRACKED_LEAGUES.find((l) => l.id === leagueId);
-      console.log(`\nProcessing league: ${league?.name} (ID: ${leagueId})`);
-
-      for (const gw of gws) {
-        try {
-          const snapshot = await snapshotLeagueGameweek(leagueId, gw);
-          if (!snapshot) {
-            continue;
-          }
-        } catch (error) {
-          console.error(`  ✗ Failed to snapshot GW ${gw}:`, error);
-          // Continue with other gameweeks/leagues
-        }
-      }
-    }
-
-    console.log("\n✓ Snapshot job completed");
-  } catch (error) {
-    console.error("Snapshot job failed:", error);
-    throw error;
+  const toSnapshot = await getGameweeksToSnapshot();
+  if (toSnapshot.size === 0) {
+    console.log("No new gameweeks to snapshot");
+    return;
   }
+
+  // Managers often appear in several tracked leagues; fetch each once.
+  const historyCache = new Map<number, EntryHistory>();
+  const failedLeagues: number[] = [];
+
+  for (const [leagueId, gws] of toSnapshot) {
+    const league = TRACKED_LEAGUES.find((l) => l.id === leagueId);
+    console.log(`\nProcessing league: ${league?.name} (ID: ${leagueId}), GWs ${gws.join(", ")}`);
+
+    try {
+      await snapshotLeague(leagueId, gws, historyCache);
+    } catch (error) {
+      console.error(`  ✗ Failed to snapshot league ${leagueId}:`, error);
+      failedLeagues.push(leagueId);
+    }
+  }
+
+  if (failedLeagues.length > 0) {
+    throw new Error(`Snapshot failed for leagues ${failedLeagues.join(", ")}`);
+  }
+
+  console.log("\n✓ Snapshot job completed");
 }
