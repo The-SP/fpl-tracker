@@ -36,6 +36,7 @@ The API routes are:
 - Preserve the existing Tailwind CSS and shadcn-style component patterns.
 - Snapshot jobs must be idempotent, update existing gameweek rows safely, and tolerate partial FPL API failures where possible.
 - `/api/snapshot` and `/api/pot/snapshot` are public and support both `GET` and `POST`, so manual buttons and scheduled jobs can use the same endpoints.
+- `vercel.json` schedules a daily Vercel Cron `GET` of `/api/pot/snapshot` at 00:00 UTC (about 05:45 to 06:45 NPT on the Hobby plan). `/api/snapshot` has no cron and is triggered manually.
 - `/api/snapshot` enforces a 3-hour cooldown; `/api/pot/snapshot` enforces a 1-hour cooldown. They use `snapshot_runs` and `pot_snapshot_runs`, respectively. Record a successful run only after its job completes; failed jobs must remain retryable.
 - Pot results may be provisional until every roster member’s result for a gameweek is final. Preserve `is_final` behavior when changing pot snapshot, ranking, balance, or UI logic.
 - Keep manager/team FPL links pointed at the appropriate history or gameweek event URL when adding or changing pot or standings tables.
@@ -58,6 +59,15 @@ pnpm build
 ```
 
 Tests live in `tests/` and run with Vitest against an in-memory database. `pnpm format` rewrites TypeScript and TSX files; use it only when formatting changes are intended.
+
+## Deployment
+
+Production deploys use the Vercel CLI through the `deploy` script:
+
+```bash
+pnpm run deploy
+```
+ Cron jobs only run on production deployments; confirm them under the project's Settings → Cron Jobs in Vercel.
 
 ## Next.js guidance
 
