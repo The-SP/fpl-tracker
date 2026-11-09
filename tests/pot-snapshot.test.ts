@@ -24,11 +24,12 @@ function history(points: Record<number, number>): EntryHistory {
   }
 }
 
-const member = (entryId: number, active = true): PotMember => ({
+const member = (entryId: number, active = true, joinedGw = 1): PotMember => ({
   entry_id: entryId,
   entry_name: `Team ${entryId}`,
   player_name: `Player ${entryId}`,
   active,
+  joined_gw: joinedGw,
 })
 
 describe("getPotGameweekStatuses", () => {
@@ -47,6 +48,19 @@ describe("getPotGameweekStatuses", () => {
 })
 
 describe("buildPotGameweekResults", () => {
+  it("leaves out late joiners before their start gameweek", () => {
+    const members = [member(1), member(2, true, 10)]
+    const histories = new Map([
+      [1, history({ 9: 50, 10: 50 })],
+      [2, history({ 9: 90, 10: 90 })],
+    ])
+    expect(buildPotGameweekResults(9, true, members, histories).results.map((r) => r.entry_id)).toEqual([1])
+    expect(buildPotGameweekResults(10, true, members, histories).results.map((r) => [r.entry_id, r.is_winner])).toEqual([
+      [2, true],
+      [1, false],
+    ])
+  })
+
   it("ranks ties together and marks all of them winners", () => {
     const members = [member(1), member(2), member(3), member(4)]
     const histories = new Map([

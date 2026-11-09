@@ -4,7 +4,9 @@ import {
   computePotBalances,
   getAllPotResultsByGw,
   getLatestFinalPotGw,
+  getPotMembers,
   recalculatePotRankings,
+  upsertPotLateJoiners,
   type PotGwResult,
 } from "@/lib/pot-db"
 
@@ -88,5 +90,15 @@ describe("pot database", () => {
 
   it("reports the latest gameweek whose rows are all final", async () => {
     expect(await getLatestFinalPotGw()).toBe(1)
+  })
+
+  it("adds late joiners and drops their results before the start gameweek", async () => {
+    await upsertPotLateJoiners([{ entry_id: 5, joined_gw: 2 }, { entry_id: 4, joined_gw: 2 }])
+    const members = await getPotMembers()
+    expect(members.find((m) => m.entry_id === 5)).toMatchObject({ joined_gw: 2, active: true })
+    expect(members.find((m) => m.entry_id === 4)).toMatchObject({ joined_gw: 2, entry_name: "Team 4" })
+    expect(members.find((m) => m.entry_id === 1)?.joined_gw).toBe(1)
+    const gw1 = (await getAllPotResultsByGw()).get(1)!
+    expect(gw1.map((r) => r.entry_id)).toEqual([1, 2, 3])
   })
 })

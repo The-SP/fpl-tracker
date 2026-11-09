@@ -8,12 +8,14 @@ import {
   type EntryHistory,
 } from "./fpl";
 import { resolvePotRoster } from "./pot-roster";
+import { POT_LATE_JOINERS } from "@/config/pot";
 import { initializeDatabase } from "./db";
 import { competitionRank } from "./ranking";
 import {
   getPotMembers,
   getStoredPotResultStatus,
   seedPotMembersIfEmpty,
+  upsertPotLateJoiners,
   recalculatePotRankings,
   storePotResults,
   updatePotMemberNames,
@@ -41,7 +43,8 @@ export function getPotGameweekStatuses(bootstrap: BootstrapData): Map<number, bo
  * Ranking uses FPL's `points` field directly, which is already net of
  * transfer-cost hits. Ties share the same rank and are all marked as winners
  * (prize split evenly at read time). Members whose history could not be
- * fetched are returned in `missingIds`.
+ * fetched are returned in `missingIds`. Members who join the pot after this
+ * gameweek are left out.
  */
 export function buildPotGameweekResults(
   gw: number,
@@ -53,7 +56,7 @@ export function buildPotGameweekResults(
   const rows: Omit<PotGwResult, "rank" | "is_winner">[] = [];
 
   for (const member of members) {
-    if (!member.active) continue;
+    if (!member.active || gw < member.joined_gw) continue;
 
     const history = histories.get(member.entry_id);
     if (!history) {
@@ -100,7 +103,7 @@ function isGameweekUpToDate(
   if (!isFinal || !stored) return false;
 
   return members
-    .filter((member) => member.active)
+    .filter((member) => member.active && gw >= member.joined_gw)
     .filter((member) => {
       const history = histories.get(member.entry_id);
       return !history || getGameweekPointsFromHistory(history, gw) !== null;
@@ -139,6 +142,17 @@ export async function runPotSnapshotJob(): Promise<void> {
     console.log("Pot: no roster yet, resolving from source league...");
     const roster = await resolvePotRoster();
     await seedPotMembersIfEmpty(roster);
+    members = await getPotMembers();
+  }
+
+  // Late joiners are added to an established roster explicitly from config.
+  const lateJoiners = POT_LATE_JOINERS.filter(
+    (j) => members.find((m) => m.entry_id === j.entryId)?.joined_gw !== j.fromGw,
+  );
+  if (lateJoiners.length > 0) {
+    await upsertPotLateJoiners(
+      lateJoiners.map((j) => ({ entry_id: j.entryId, joined_gw: j.fromGw })),
+    );
     members = await getPotMembers();
   }
 

@@ -6,6 +6,8 @@ export interface PotMember {
   entry_name: string
   player_name: string
   active: boolean
+  // First gameweek this member counts toward the pot.
+  joined_gw: number
 }
 
 export interface PotGwResult {
@@ -71,13 +73,14 @@ export async function recordPotSnapshotCall(calledAt: string): Promise<void> {
 
 export async function getPotMembers(): Promise<PotMember[]> {
   const result = await db.execute(
-    "SELECT entry_id, entry_name, player_name, active FROM pot_members"
+    "SELECT entry_id, entry_name, player_name, active, joined_gw FROM pot_members"
   )
   return (result.rows as DatabaseRow[]).map((r) => ({
     entry_id: Number(r.entry_id),
     entry_name: nullableString(r.entry_name),
     player_name: nullableString(r.player_name),
     active: !!r.active,
+    joined_gw: Number(r.joined_gw ?? 1),
   }))
 }
 
@@ -88,7 +91,12 @@ export async function getPotMembers(): Promise<PotMember[]> {
  * re-deriving it from the league automatically every run.
  */
 export async function seedPotMembersIfEmpty(
-  members: { entry_id: number; entry_name: string; player_name: string }[]
+  members: {
+    entry_id: number
+    entry_name: string
+    player_name: string
+    joined_gw: number
+  }[]
 ): Promise<void> {
   const existing = await getPotMembers()
   if (existing.length > 0 || members.length === 0) return
@@ -97,9 +105,37 @@ export async function seedPotMembersIfEmpty(
   // cannot fail on the primary key.
   await db.batch(
     members.map((m) => ({
-      sql: "INSERT OR IGNORE INTO pot_members (entry_id, entry_name, player_name, active) VALUES (?, ?, ?, 1)",
-      args: [m.entry_id, m.entry_name, m.player_name],
+      sql: "INSERT OR IGNORE INTO pot_members (entry_id, entry_name, player_name, active, joined_gw) VALUES (?, ?, ?, 1, ?)",
+      args: [m.entry_id, m.entry_name, m.player_name, m.joined_gw],
     })),
+    "write"
+  )
+}
+
+/**
+ * Adds configured late joiners to an established roster, or corrects their
+ * start gameweek. Existing members are otherwise left alone. Any stored
+ * results from before a joiner's start gameweek are removed. New rows get
+ * empty names, which the snapshot job repairs from FPL.
+ */
+export async function upsertPotLateJoiners(
+  joiners: { entry_id: number; joined_gw: number }[]
+): Promise<void> {
+  if (joiners.length === 0) return
+
+  await db.batch(
+    joiners.flatMap((j) => [
+      {
+        sql: `INSERT INTO pot_members (entry_id, entry_name, player_name, active, joined_gw)
+              VALUES (?, '', '', 1, ?)
+              ON CONFLICT(entry_id) DO UPDATE SET joined_gw = excluded.joined_gw`,
+        args: [j.entry_id, j.joined_gw],
+      },
+      {
+        sql: "DELETE FROM pot_gw_results WHERE entry_id = ? AND gw < ?",
+        args: [j.entry_id, j.joined_gw],
+      },
+    ]),
     "write"
   )
 }

@@ -63,4 +63,10 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE pot_gw_results ADD COLUMN is_final INTEGER NOT NULL DEFAULT 1;
     `,
   },
+  {
+    name: "003_pot_member_joined_gw",
+    sql: [
+      "ALTER TABLE pot_members ADD COLUMN joined_gw INTEGER NOT NULL DEFAULT 1",
+    ],
+  },
 ]
